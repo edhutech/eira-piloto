@@ -23,7 +23,7 @@ REGISTRY_PATH = ROOT / ".participation_tracker" / "programs.json"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 REQUIRED_SHEETS = ["Programa", "Sesiones", "Participantes", "Control"]
-PARTICIPANT_HEADERS = ["nombre", "correo", "aliases", "source", "status"]
+PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]
 SESSION_HEADERS = [
     "session_number", "session_name", "participant", "email", "voice_total",
     "voice_valid", "chat_total", "chat_valid", "score",
@@ -175,7 +175,8 @@ def load_participants_from_rows(rows: list[list[Any]], source: str) -> list[dict
         if not name.strip() or not email.strip():
             raise ValueError(f"La fila {row_number} requiere nombre y correo")
         participants.append({
-            "nombre": name, "correo": email, "aliases": "", "source": source, "status": "new",
+            "participant_id": "", "nombre": name, "correo": email, "aliases": "",
+            "role": "participant", "source": source, "status": "new",
         })
     return participants
 
@@ -269,7 +270,7 @@ def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict
         "Programa": [PROGRAM_HEADERS, [plan.program_name, plan.folder_id, plan.folder_url,
                                          str(plan.session_count), plan.participant_mode, created_at]],
         "Sesiones": [SESSION_HEADERS],
-        "Participantes": [PARTICIPANT_HEADERS] + [[p[h] for h in PARTICIPANT_HEADERS] for p in plan.participants],
+        "Participantes": [PARTICIPANT_HEADERS] + [[p.get(h, "participant" if h == "role" else "") for h in PARTICIPANT_HEADERS] for p in plan.participants],
         "Control": [CONTROL_HEADERS] + [[int(record["session_number"]), record["session_name"], record["folder_id"],
                                           "pending", "pending", "pending", ""]
                                          for record in session_records],
