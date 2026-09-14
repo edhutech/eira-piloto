@@ -3,12 +3,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
+from typing import Literal
 
 
 class FileStatus(str, Enum):
     NEW = "NEW"
     MODIFIED = "MODIFIED"
     UNCHANGED = "UNCHANGED"
+
+
+@dataclass(frozen=True)
+class NormalizedEvent:
+    session_number: int
+    participant_raw: str
+    channel: Literal["voice", "chat"]
+    timestamp_raw: str | None
+    timestamp_seconds: float | None
+    raw_text: str
+    text: str
+    source_file_id: str
+    source_locator: str
+    event_id: str
+    identity_type: Literal["HUMAN", "SYSTEM"] = "HUMAN"
+    participant_base_raw: str | None = None
+
+
+@dataclass(frozen=True)
+class DiscardedDocumentEvent:
+    participant_raw: str
+    source_locator: str
+    reason: str
 
 
 @dataclass(frozen=True)

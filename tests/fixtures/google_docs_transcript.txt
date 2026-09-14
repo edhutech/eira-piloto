@@ -1,0 +1,4 @@
+[00:00:01] Alice: Hola equipo
+Bob: Primera intervención.
+continuación en otra línea.
+[00:00:15] Alice: Segunda intervención.

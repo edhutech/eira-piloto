@@ -37,8 +37,11 @@ Prepara y mantiene el seguimiento de participación de un programa en Google Dri
 - `correo` es el identificador estable cuando está disponible. Si no hay correo, conservar el participante con un identificador provisional y no inventar uno.
 - La participación no equivale automáticamente a asistencia. No marcar presencia ni calcular participación durante `init`.
 - `sync_state.json` vive en `.participation_tracker/` y es estado runtime excluido de Git.
-- Un `NormalizedEvent` debe conservar `session_number`, `participant_raw`, `participant_id` o `participant` resuelto cuando exista, `channel`, `timestamp_raw`, `timestamp_seconds` opcional, `raw_text`, `text`, `source_file_id` y `countability`.
-- `countability` solo admite `COUNT`, `NO_COUNT` o `AMBIGUOUS`. En esta fase no se usa LLM; los eventos `AMBIGUOUS` quedan pendientes.
+- La capa de lectura adapta Google Docs nativo a texto y archivos de Drive a texto o bytes según el formato; lectura y parsing son responsabilidades separadas.
+- En la fase de parsing, `NormalizedEvent` conserva `session_number`, `participant_raw`, `channel`, `timestamp_raw`, `timestamp_seconds` opcional, `raw_text`, `text` y `source_file_id`.
+- Los parsers no asignan `participant_id` ni `countability`; esos campos pertenecen a fases posteriores.
+- La etiqueta general `<nombre>'s Presentation` se marca como identidad `SYSTEM`; su nombre base se conserva como `participant_base_raw` y no crea participante ni participación.
+- No inferir roles de `HUMAN` (estudiante, facilitador o presentador) durante parsing.
 
 ## Init Procedure
 
@@ -106,36 +109,34 @@ Prepara y mantiene el seguimiento de participación de un programa en Google Dri
 3. Inspeccionar las carpetas de sesiones y detectar archivos nuevos o modificados mediante `file_id`, `modifiedTime`, checksum/tamaño y hash de contenido cuando sea necesario.
 4. No reprocesar una sesión `PROCESSED` si sus archivos relevantes no cambiaron.
 5. Seleccionar parsers independientes principalmente por formato: Google Docs, DOCX, VTT, SBV y TXT. Añadir formatos solo ante un caso real.
-6. Cada parser produce eventos normalizados con el contrato descrito abajo. Debe identificar transcript `voice` y chat `chat` válidos; si falta uno, marcar la sesión `INCOMPLETE`.
-7. Aplicar limpieza determinista antes de resolver participantes.
-8. En `auto`, una identidad nueva con nombre determinístico crea/reutiliza un participante provisional con `source=auto`, `status=unverified` y correo vacío. Solo usar `NEEDS_REVIEW` si hay más de una asociación posible.
-9. En `import`, resolver únicamente contra la lista oficial. Si no hay asociación determinística, marcar `NEEDS_REVIEW`; nunca inventar una asociación.
-10. No convertir timestamps a UTC si el archivo no proporciona una zona horaria confiable.
-11. No calcular ranking final ni llamar al LLM. Los casos `AMBIGUOUS` de `countability` permanecen pendientes.
-12. Preparar resultados en staging y reemplazar/upsertar únicamente las filas de la sesión procesada después de terminar correctamente.
-13. Leer de vuelta Sheets y actualizar `sync_state.json` solo tras verificar la escritura.
+6. La capa de lectura obtiene Google Docs mediante Google Docs/Drive y descarga DOCX, VTT, SBV y TXT mediante Drive; devuelve texto o bytes y conserva `file_id` y metadatos.
+7. Cada parser produce eventos normalizados con el contrato descrito abajo. Debe identificar transcript `voice` y chat `chat` válidos; si falta uno, marcar la sesión `INCOMPLETE`.
+8. Aplicar limpieza determinista antes de resolver participantes.
+9. En `auto`, una identidad nueva con nombre determinístico crea/reutiliza un participante provisional con `source=auto`, `status=unverified` y correo vacío. Solo usar `NEEDS_REVIEW` si hay más de una asociación posible.
+10. En `import`, resolver únicamente contra la lista oficial. Si no hay asociación determinística, marcar `NEEDS_REVIEW`; nunca inventar una asociación.
+11. No convertir timestamps a UTC si el archivo no proporciona una zona horaria confiable.
+12. No calcular ranking final ni llamar al LLM. Los casos `AMBIGUOUS` de `countability` permanecen pendientes.
+13. Preparar resultados en staging y reemplazar/upsertar únicamente las filas de la sesión procesada después de terminar correctamente.
+14. Leer de vuelta Sheets y actualizar `sync_state.json` solo tras verificar la escritura.
 
 ### Parser contract
 
 ```python
 class Parser(Protocol):
     def can_parse(self, file_metadata: FileMetadata) -> bool: ...
-    def parse(self, file_metadata: FileMetadata, content: bytes) -> ParseResult: ...
+    def parse(self, file_metadata: FileMetadata, content: str | bytes, session_number: int) -> ParseResult: ...
 ```
 
 ```python
 class NormalizedEvent:
     session_number: int
     participant_raw: str
-    participant_id: str | None
-    participant: str | None
     channel: Literal["voice", "chat"]
     timestamp_raw: str | None
     timestamp_seconds: float | None
     raw_text: str
     text: str
     source_file_id: str
-    countability: Literal["COUNT", "NO_COUNT", "AMBIGUOUS"]
 ```
 
 `ParseResult` debe indicar validez, canal, eventos, parser, advertencias y errores. Un parser inválido no produce eventos válidos parciales.
