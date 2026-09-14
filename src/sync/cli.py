@@ -14,6 +14,7 @@ from .ranking_repository import GoogleSheetsRankingGateway, RankingRepository
 from .registry import DEFAULT_PROGRAMS_PATH, load_programs
 from .session_processor import SessionProcessor
 from .session_results_repository import GoogleSheetsSessionResultsGateway, SessionResultsRepository
+from .sheet_styling import GoogleSheetStyler
 from .state import DEFAULT_STATE_PATH
 from .tracking_gateway import GoogleSheetsTrackingGateway
 from .tracking_repository import TrackingRepository
@@ -51,8 +52,11 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
                 GoogleSheetsRankingGateway(
                     sheets, program.sheet_id, ids.get("Ranking"), "Ranking"))
             participant_repository.ensure_role_validation()
+            tracking_gateway = GoogleSheetsTrackingGateway(sheets, program.sheet_id, "Seguimiento")
+            tracking_gateway.ensure_sheet(len(program.sessions))
+            GoogleSheetStyler(sheets, program.sheet_id).apply()
             tracking_repository = TrackingRepository(
-                GoogleSheetsTrackingGateway(sheets, program.sheet_id, "Seguimiento"),
+                tracking_gateway,
                 participant_repository, session_results_repository)
             resolver_factory = None
             if program.participant_mode == "import":

@@ -367,6 +367,16 @@ def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[
         session_records.append({"session_number": len(session_records) + 1,
                                "session_name": name, "folder_id": folder_id or ""})
     sheet_id = _ensure_sheet(sheets, drive, plan, children, session_records)
+    from src.sync.participant_repository import GoogleSheetsValuesGateway, ParticipantRepository
+    from src.sync.sheet_styling import GoogleSheetStyler
+    metadata = sheets.spreadsheets().get(spreadsheetId=sheet_id, includeGridData=False,
+                                         fields="sheets(properties(title,sheetId))").execute()
+    ids = {item["properties"]["title"]: item["properties"]["sheetId"]
+           for item in metadata.get("sheets", [])}
+    GoogleSheetStyler(sheets, sheet_id).apply()
+    if ids.get("Participantes") is not None:
+        ParticipantRepository(GoogleSheetsValuesGateway(
+            sheets, sheet_id, "Participantes", ids["Participantes"])).ensure_role_validation()
     record = {"program_name": plan.program_name, "folder_id": plan.folder_id,
               "folder_url": plan.folder_url, "session_count": plan.session_count,
               "participant_mode": plan.participant_mode, "sheet_id": sheet_id,
