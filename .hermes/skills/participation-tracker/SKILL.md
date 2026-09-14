@@ -40,6 +40,12 @@ Prepara y mantiene el seguimiento de participación de un programa en Google Dri
 - La capa de lectura adapta Google Docs nativo a texto y archivos de Drive a texto o bytes según el formato; lectura y parsing son responsabilidades separadas.
 - En la fase de parsing, `NormalizedEvent` conserva `session_number`, `participant_raw`, `channel`, `timestamp_raw`, `timestamp_seconds` opcional, `raw_text`, `text` y `source_file_id`.
 - Los parsers no asignan `participant_id` ni `countability`; esos campos pertenecen a fases posteriores.
+- El contrato de `Participant` incluye `participant_id`, `nombre`, `correo`, `aliases`, `role`, `source` y `status`.
+- `role` admite `participant`, `facilitator` u `other`; el valor por defecto es `participant` y no se infiere durante la resolución.
+- En `auto`, una identidad HUMAN nueva claramente identificable crea un participante provisional persistible con ID estable, correo vacío, `source=auto` y `status=unverified`.
+- En `import`, la lista oficial no se amplía automáticamente: se resuelve por ID existente, correo exacto, alias/nombre `strict` normalizados o una única asociación `loose` secundaria; las asociaciones múltiples quedan en `NEEDS_REVIEW`.
+- `strict_name_key` conserva diacríticos; `loose_name_key` los elimina y nunca fusiona automáticamente dos participantes existentes que solo coincidan en loose.
+- Los eventos `SYSTEM` se ignoran y nunca crean participantes.
 - La etiqueta general `<nombre>'s Presentation` se marca como identidad `SYSTEM`; su nombre base se conserva como `participant_base_raw` y no crea participante ni participación.
 - No inferir roles de `HUMAN` (estudiante, facilitador o presentador) durante parsing.
 
