@@ -25,8 +25,9 @@ SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 REQUIRED_SHEETS = ["Programa", "Sesiones", "Participantes", "Control"]
 PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]
 SESSION_HEADERS = [
-    "session_number", "session_name", "participant", "email", "voice_total",
-    "voice_valid", "chat_total", "chat_valid", "score",
+    "session_number", "session_name", "participant_id", "participant", "email",
+    "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
+    "score", "scoring_complete", "countability_ruleset_version",
 ]
 CONTROL_HEADERS = [
     "session_number", "session_name", "folder_id", "transcript_status",

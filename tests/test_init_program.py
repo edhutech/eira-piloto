@@ -81,6 +81,11 @@ class InitProgramTests(unittest.TestCase):
             {"session_number": "1", "session_name": "01 - Sesión 1", "folder_id": "f1"},
             {"session_number": "2", "session_name": "02 - Sesión 2", "folder_id": "f2"},
         ])
+        self.assertEqual(values["Sesiones"][0], [
+            "session_number", "session_name", "participant_id", "participant", "email",
+            "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
+            "score", "scoring_complete", "countability_ruleset_version",
+        ])
         self.assertEqual(len(values["Sesiones"]), 1)
         self.assertEqual(values["Control"][1][0], 1)
         self.assertEqual(values["Control"][2][0], 2)

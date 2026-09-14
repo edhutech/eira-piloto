@@ -12,6 +12,19 @@ CANONICAL_PARTICIPANT_HEADERS = [
 PARTICIPANT_ROLES = {"participant", "facilitator", "other"}
 
 
+def execute_with_transient_retry(operation: Any, max_attempts: int = 3) -> Any:
+    for attempt in range(max_attempts):
+        try:
+            return operation()
+        except Exception as exc:
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if status != 429 and not (isinstance(status, int) and status >= 500):
+                raise
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(2 ** attempt)
+
+
 def decode_aliases(cell: Any) -> list[str]:
     """Decode the canonical one-alias-per-line Sheets representation."""
     aliases: list[str] = []
@@ -83,16 +96,7 @@ class GoogleSheetsValuesGateway:
         ).execute())
 
     def _execute(self, operation: Any) -> Any:
-        for attempt in range(self.max_attempts):
-            try:
-                return operation()
-            except Exception as exc:
-                status = getattr(getattr(exc, "resp", None), "status", None)
-                if status != 429 and not (isinstance(status, int) and status >= 500):
-                    raise
-                if attempt == self.max_attempts - 1:
-                    raise
-                time.sleep(2 ** attempt)
+        return execute_with_transient_retry(operation, self.max_attempts)
 
 
 class ParticipantRepository:
