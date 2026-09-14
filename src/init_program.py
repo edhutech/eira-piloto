@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / ".participation_tracker" / "programs.json"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-REQUIRED_SHEETS = ["Programa", "Sesiones", "Participantes", "Ranking", "Control"]
+REQUIRED_SHEETS = ["Seguimiento", "Programa", "Sesiones", "Participantes", "Ranking", "Control"]
 PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]
 SESSION_HEADERS = [
     "session_number", "session_name", "participant_id", "participant", "email",
@@ -292,7 +292,13 @@ def _print_summary(plan: InitPlan) -> None:
 
 def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict[str, list[list[Any]]]:
     created_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    from src.sync.tracking_repository import TrackingSession, TrackingView, tracking_values
+    tracking = tracking_values(TrackingView((), tuple(
+        TrackingSession(int(record["session_number"]), record["session_name"], "PENDING", None, None, None, {})
+        for record in session_records
+    )))[0]
     return {
+        "Seguimiento": tracking,
         "Programa": [PROGRAM_HEADERS, [plan.program_name, plan.folder_id, plan.folder_url,
                                          str(plan.session_count), plan.participant_mode, created_at]],
         "Sesiones": [SESSION_HEADERS],
@@ -321,7 +327,7 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
             sheets.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": requests}).execute()
     else:
         created = sheets.spreadsheets().create(body={"properties": {"title": title},
-                                                    "sheets": [{"properties": {"title": "Programa"}}]}).execute()
+                                                    "sheets": [{"properties": {"title": "Seguimiento"}}]}).execute()
         sheet_id = created["spreadsheetId"]
         sheets.spreadsheets().batchUpdate(
             spreadsheetId=sheet_id,

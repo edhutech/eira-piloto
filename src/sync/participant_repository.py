@@ -63,6 +63,7 @@ class GoogleSheetsValuesGateway:
     service: Any
     spreadsheet_id: str
     sheet_name: str = "Participantes"
+    worksheet_id: int | None = None
     max_attempts: int = 3
 
     def read_values(self) -> list[list[Any]]:
@@ -98,6 +99,22 @@ class GoogleSheetsValuesGateway:
     def _execute(self, operation: Any) -> Any:
         return execute_with_transient_retry(operation, self.max_attempts)
 
+    def ensure_role_validation(self) -> None:
+        if self.worksheet_id is None:
+            raise RuntimeError("worksheet_id requerido para validar role")
+        self._execute(lambda: self.service.spreadsheets().batchUpdate(
+            spreadsheetId=self.spreadsheet_id,
+            body={"requests": [{"setDataValidation": {
+                "range": {"sheetId": self.worksheet_id, "startRowIndex": 1,
+                          "startColumnIndex": 4, "endColumnIndex": 5},
+                "rule": {"condition": {"type": "ONE_OF_LIST", "values": [
+                    {"userEnteredValue": "participant"},
+                    {"userEnteredValue": "facilitator"},
+                    {"userEnteredValue": "other"},
+                ]}, "strict": True, "showCustomUi": True},
+            }}]},
+        ).execute())
+
 
 class ParticipantRepository:
     """Persists participants through a Sheets values gateway."""
@@ -105,6 +122,11 @@ class ParticipantRepository:
     def __init__(self, gateway: SheetsValuesGateway):
         self.gateway = gateway
         self.headers: list[str] = []
+
+    def ensure_role_validation(self) -> None:
+        method = getattr(self.gateway, "ensure_role_validation", None)
+        if method is not None:
+            method()
 
     def migrate(self) -> list[list[Any]]:
         values = self.gateway.read_values()

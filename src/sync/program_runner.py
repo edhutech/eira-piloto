@@ -9,6 +9,8 @@ from .ranking import ProgramRanking, build_program_ranking
 from .session_processor import SessionProcessResult, SessionProcessStatus, SessionProcessor
 from .state import load_state, save_state
 
+PROCESSING_PIPELINE_VERSION = 2
+
 
 class StateStore(Protocol):
     def load(self) -> dict[str, Any]: ...
@@ -32,6 +34,7 @@ class ProgramDependencies:
     participant_repository: Any
     session_results_repository: Any
     ranking_repository: Any
+    tracking_repository: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -140,6 +143,16 @@ class ProgramRunner:
         except (OSError, RuntimeError, ValueError) as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
 
+        if dependencies.tracking_repository is not None:
+            try:
+                dependencies.tracking_repository.refresh(
+                    program.sessions,
+                    {session.session_number: sessions_state[session.folder_id]["status"]
+                     for session in program.sessions if session.folder_id in sessions_state},
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+
         counts = {status: sum(item.status is status for item in session_results)
                   for status in SessionProcessStatus}
         return ProgramRunResult(
@@ -162,7 +175,9 @@ class ProgramRunner:
         status = previous.get("status")
         if status in {"PROCESSING", "PENDING", "FAILED", "NEEDS_REVIEW"}:
             return _SessionDecision(True, fingerprints)
-        if status in {"PROCESSED", "INCOMPLETE"} and previous.get("files", {}) == fingerprints:
+        if (status in {"PROCESSED", "INCOMPLETE"}
+                and previous.get("processing_version") == PROCESSING_PIPELINE_VERSION
+                and previous.get("files", {}) == fingerprints):
             return _SessionDecision(False, fingerprints)
         return _SessionDecision(True, fingerprints)
 
@@ -174,5 +189,6 @@ class ProgramRunner:
             "session_name": inspection.session.session_name,
             "folder_id": inspection.session.folder_id,
             "status": status,
+            "processing_version": PROCESSING_PIPELINE_VERSION,
             "files": dict(fingerprints),
         }

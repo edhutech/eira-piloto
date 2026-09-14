@@ -95,8 +95,8 @@ class ProgramRunnerTests(unittest.TestCase):
     def test_processed_and_incomplete_unchanged_are_skipped(self):
         p = program()
         state = {"version": 1, "programs": {"root": {"sessions": {
-            "s1": {"status": "PROCESSED", "files": {"f1": "a"}},
-            "s2": {"status": "INCOMPLETE", "files": {"f2": "b"}},
+            "s1": {"status": "PROCESSED", "processing_version": 2, "files": {"f1": "a"}},
+            "s2": {"status": "INCOMPLETE", "processing_version": 2, "files": {"f2": "b"}},
         }}}}
         runner, processor, _, _ = self.make_runner(state, inspection_for(p, ("a", "b")))
         result = runner.run()[0]
@@ -104,6 +104,17 @@ class ProgramRunnerTests(unittest.TestCase):
         self.assertEqual(result.sessions_skipped, 2)
         self.assertEqual([item.status for item in result.session_results], [SessionProcessStatus.SKIPPED] * 2)
 
+    def test_legacy_processing_version_forces_reprocess(self):
+        p = program()
+        state = {"version": 1, "programs": {"root": {"sessions": {
+            "s1": {"status": "PROCESSED", "files": {"f1": "a"}},
+            "s2": {"status": "INCOMPLETE", "files": {"f2": "b"}},
+        }}}}
+        runner, processor, _, store = self.make_runner(state, inspection_for(p, ("a", "b")))
+        result = runner.run()[0]
+        self.assertEqual(result.sessions_processed, 2)
+        self.assertEqual(processor.calls, [1, 2])
+        self.assertEqual(store.value["programs"]["root"]["sessions"]["s1"]["processing_version"], 2)
     def test_failed_needs_review_processing_and_changed_fingerprint_retry(self):
         p = program()
         state = {"version": 1, "programs": {"root": {"sessions": {
@@ -129,8 +140,8 @@ class ProgramRunnerTests(unittest.TestCase):
     def test_ranking_rebuilds_when_every_session_is_skipped(self):
         p = program()
         state = {"version": 1, "programs": {"root": {"sessions": {
-            "s1": {"status": "PROCESSED", "files": {"f1": "a"}},
-            "s2": {"status": "INCOMPLETE", "files": {"f2": "b"}},
+            "s1": {"status": "PROCESSED", "processing_version": 2, "files": {"f1": "a"}},
+            "s2": {"status": "INCOMPLETE", "processing_version": 2, "files": {"f2": "b"}},
         }}}}
         runner, _, ranking, _ = self.make_runner(state, inspection_for(p, ("a", "b")))
         result = runner.run()[0]

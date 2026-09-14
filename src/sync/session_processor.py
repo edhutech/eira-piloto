@@ -48,6 +48,8 @@ class SessionProcessResult:
     discarded_metadata: int = 0
     participants_resolved: int = 0
     participants_created: int = 0
+    participants_excluded_by_role: int = 0
+    events_excluded_by_role: int = 0
     needs_review: int = 0
     voice_total: int = 0
     voice_valid: int = 0
@@ -107,6 +109,8 @@ class SessionProcessor:
             resolved_events: list[Any] = []
             created: dict[str, Participant] = {}
             resolved_ids: set[str] = set()
+            excluded_ids: set[str] = set()
+            excluded_events = 0
             review_messages: list[str] = []
             for event in sorted(human, key=self._event_sort_key):
                 resolution = resolver.resolve_event(event)
@@ -119,11 +123,16 @@ class SessionProcessor:
                 resolved_ids.add(participant.participant_id)
                 if participant.participant_id not in {str(r.get("participant_id", "")).strip() for r in records}:
                     created[participant.participant_id] = participant
+                if participant.role != "participant":
+                    excluded_ids.add(participant.participant_id)
+                    excluded_events += 1
+                    continue
                 resolved_events.append(SimpleNamespace(**vars(event), participant_id=participant.participant_id,
                                                        participant_email=participant.correo))
             if review_messages:
                 return SessionProcessResult(status=SessionProcessStatus.NEEDS_REVIEW,
                     **base, participants_resolved=len(resolved_ids), needs_review=len(review_messages),
+                    participants_excluded_by_role=len(excluded_ids), events_excluded_by_role=excluded_events,
                     errors=tuple(review_messages))
 
             if created:
@@ -151,6 +160,7 @@ class SessionProcessor:
             metrics = self._metrics(scores)
             return SessionProcessResult(status=SessionProcessStatus.PROCESSED,
                 **base, participants_resolved=len(resolved_ids), participants_created=len(created),
+                participants_excluded_by_role=len(excluded_ids), events_excluded_by_role=excluded_events,
                 result_rows=len(scores), changed=status != "NOOP", **metrics)
         except SessionProcessingError as exc:
             errors.append(f"{type(exc).__name__}: {exc}")

@@ -133,6 +133,24 @@ class SessionProcessorTests(unittest.TestCase):
         scores = results.calls[0][0][2]
         self.assertEqual(sum(item.voice_total + item.chat_total for item in scores), 2)
 
+    def test_facilitator_and_other_are_excluded_before_scoring(self):
+        files = [DriveFile("voice", "voice"), DriveFile("chat", "chat")]
+        parser_results = {
+            "voice": parsed("transcript", "voice", [
+                event("fac", "Facilitador"), event("other", "Otro"),
+                event("screen", "Facilitador's Presentation", identity_type="SYSTEM"),
+            ]),
+            "chat": parsed("chat", "chat", []),
+        }
+        people = [Participant("f", "Facilitador", role="facilitator"), Participant("o", "Otro", role="other")]
+        processor, _, results = self.make_processor(files, parser_results, people)
+        output = processor.process(inspection(files))
+        self.assertEqual(output.status, SessionProcessStatus.PROCESSED)
+        self.assertEqual(output.participants_excluded_by_role, 2)
+        self.assertEqual(output.events_excluded_by_role, 2)
+        self.assertEqual(output.system_events, 1)
+        self.assertEqual(results.calls[0][0][2], [])
+
     def test_existing_participant_is_not_created(self):
         files = [DriveFile("v", "v"), DriveFile("c", "c")]
         results_map = {"v": parsed("transcript", "voice", [event("v", "Ana")]), "c": parsed("chat", "chat", [event("c", "Ana", "chat")])}
