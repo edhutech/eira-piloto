@@ -169,6 +169,15 @@ class SheetsValueCanonicalizationTests(unittest.TestCase):
 
 
 class SessionResultsRepositoryTests(unittest.TestCase):
+    def test_load_scores_decodes_confirmed_persisted_rows(self):
+        row = [1, "Sesión 1", "p1", "Ana", "ana@example.com", 2, 1, 3, 2, 1, "1.5", "TRUE", 1]
+        repository = SessionResultsRepository(FakeGateway([CANONICAL_SESSION_HEADERS, row]))
+        scores = repository.load_scores()
+        self.assertEqual(len(scores), 1)
+        self.assertEqual(scores[0].participant_id, "p1")
+        self.assertEqual(scores[0].score, Decimal("1.5"))
+        self.assertTrue(scores[0].scoring_complete)
+
     def test_legacy_empty_schema_migrates_by_appending_missing_columns(self):
         gateway = FakeGateway([LEGACY_HEADERS])
         repository = SessionResultsRepository(gateway)

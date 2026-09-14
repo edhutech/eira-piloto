@@ -203,6 +203,21 @@ class SessionResultsRepository:
             records.append(record)
         return records
 
+    def load_scores(self) -> list[ParticipantSessionScore]:
+        """Decode confirmed persisted rows for downstream derived views."""
+        records = self.load_records()
+        return [ParticipantSessionScore(
+            session_number=int(record["session_number"]),
+            participant_id=str(record["participant_id"]).strip(),
+            voice_total=int(record["voice_total"]),
+            voice_valid=int(record["voice_valid"]),
+            chat_total=int(record["chat_total"]),
+            chat_valid=int(record["chat_valid"]),
+            ambiguous_total=int(record["ambiguous_total"]),
+            score=Decimal(str(record["score"])),
+            scoring_complete=_parse_bool(record["scoring_complete"]),
+        ) for record in records]
+
     def replace_session(
         self,
         session_number: int,
@@ -377,6 +392,17 @@ def _canonical_score(value: Decimal | str | int | float) -> str:
     if score < 0 or (score * 2) != (score * 2).to_integral_value():
         raise ValueError("El score debe ser no negativo y estar en incrementos de 0.5")
     return format(score, "f")
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    raise ValueError(f"Booleano inválido: {value}")
 
 
 def _cell_equal(left: Any, right: Any, field: str | None = None) -> bool:

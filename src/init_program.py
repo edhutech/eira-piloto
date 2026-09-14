@@ -212,17 +212,37 @@ def load_participants(source: str, sheets_service: Any = None) -> list[dict[str,
     raise ValueError("El origen debe ser un archivo CSV/XLSX o el ID de un Google Sheet")
 
 
-def get_google_services() -> tuple[Any, Any]:
+def _get_google_credentials() -> Any:
     try:
         from google.oauth2.credentials import Credentials
-        from googleapiclient.discovery import build
     except ImportError as exc:
         raise RuntimeError("Faltan dependencias de Google Workspace") from exc
     token = Path.home() / ".hermes" / "google_token.json"
     if not token.exists():
         raise RuntimeError(f"No existe el token OAuth: {token}")
-    credentials = Credentials.from_authorized_user_file(str(token))
+    return Credentials.from_authorized_user_file(str(token))
+
+
+def get_google_services() -> tuple[Any, Any]:
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError("Faltan dependencias de Google Workspace") from exc
+    credentials = _get_google_credentials()
     return build("drive", "v3", credentials=credentials), build("sheets", "v4", credentials=credentials)
+
+
+def get_google_services_with_docs() -> tuple[Any, Any, Any]:
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError("Faltan dependencias de Google Workspace") from exc
+    credentials = _get_google_credentials()
+    return (
+        build("drive", "v3", credentials=credentials),
+        build("sheets", "v4", credentials=credentials),
+        build("docs", "v1", credentials=credentials),
+    )
 
 
 def validate_drive_folder(drive: Any, folder_id: str) -> dict[str, Any]:
