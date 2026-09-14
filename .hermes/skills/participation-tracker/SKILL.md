@@ -46,6 +46,10 @@ Prepara y mantiene el seguimiento de participación de un programa en Google Dri
 - En `import`, la lista oficial no se amplía automáticamente: se resuelve por ID existente, correo exacto, alias/nombre `strict` normalizados o una única asociación `loose` secundaria; las asociaciones múltiples quedan en `NEEDS_REVIEW`.
 - `strict_name_key` conserva diacríticos; `loose_name_key` los elimina y nunca fusiona automáticamente dos participantes existentes que solo coincidan en loose.
 - Los eventos `SYSTEM` se ignoran y nunca crean participantes.
+- Countability es una capa posterior separada: solo clasifica eventos HUMAN resueltos como `COUNT`, `NO_COUNT` o `AMBIGUOUS`; no evalúa relevancia, calidad ni pertinencia.
+- Cada decisión de countability conserva `event_id`, `status`, `reason_code` y `rule_id`; `NO_COUNT` requiere una regla determinista auditable.
+- `COUNTABILITY_RULESET_VERSION = 1`; los `rule_id` son estables y versionados, por ejemplo `greeting_only.v1`, `technical_only.v1` y `substantive_default.v1`.
+- No usar longitud como único criterio. Si existe contenido humano no descartable, el default conservador es `COUNT`; `AMBIGUOUS` se reserva para casos excepcionales con contexto indispensable explícitamente ausente.
 - La etiqueta general `<nombre>'s Presentation` se marca como identidad `SYSTEM`; su nombre base se conserva como `participant_base_raw` y no crea participante ni participación.
 - No inferir roles de `HUMAN` (estudiante, facilitador o presentador) durante parsing.
 
