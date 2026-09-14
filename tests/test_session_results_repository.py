@@ -7,6 +7,7 @@ from src.sync.session_results_repository import (
     GoogleSheetsSessionResultsGateway,
     ParticipantSnapshot,
     SessionResultsRepository,
+    _cell_equal,
 )
 
 
@@ -134,6 +135,37 @@ def score(session, participant_id, voice_total=1, voice_valid=1, chat_total=0, c
 
 def snapshot(participant_id, name=None, email=""):
     return ParticipantSnapshot(participant_id, name or participant_id, email)
+
+
+class SheetsValueCanonicalizationTests(unittest.TestCase):
+    def test_int_and_numeric_string_are_equivalent(self):
+        self.assertTrue(_cell_equal(21, "21", "voice_total"))
+
+    def test_decimal_and_decimal_string_are_equivalent(self):
+        self.assertTrue(_cell_equal(Decimal("1.5"), "1.50", "score"))
+
+    def test_boolean_strings_are_equivalent(self):
+        self.assertTrue(_cell_equal(True, "TRUE", "scoring_complete"))
+        self.assertTrue(_cell_equal(False, "FALSE", "scoring_complete"))
+
+    def test_real_differences_remain_different(self):
+        self.assertFalse(_cell_equal(21, "22", "voice_total"))
+        self.assertFalse(_cell_equal(True, "FALSE", "scoring_complete"))
+        self.assertFalse(_cell_equal(True, "1", "voice_valid"))
+
+    def test_empty_is_not_zero_or_false(self):
+        self.assertFalse(_cell_equal("", 0, "voice_total"))
+        self.assertFalse(_cell_equal("", False, "scoring_complete"))
+
+    def test_equivalent_sheet_row_produces_noop(self):
+        row = ["1", "Sesión 1", "p1", "Ana", "", "1", "0", "0", "0", "0", "0.50", "FALSE", "1"]
+        gateway = FakeGateway([CANONICAL_SESSION_HEADERS, row])
+        repository = SessionResultsRepository(gateway)
+        result = score(1, "p1", voice_valid=0, score="0.5", complete=False)
+        outcome = repository.replace_session(1, "Sesión 1", [result], {"p1": snapshot("p1", "Ana")})
+        self.assertEqual(outcome.status, "NOOP")
+        self.assertEqual(gateway.writes, 0)
+        self.assertEqual(gateway.values[1][10], "0.50")
 
 
 class SessionResultsRepositoryTests(unittest.TestCase):

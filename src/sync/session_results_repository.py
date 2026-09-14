@@ -14,6 +14,10 @@ CANONICAL_SESSION_HEADERS = [
     "score", "scoring_complete", "countability_ruleset_version",
 ]
 CANONICAL_SESSION_KEYS = {str(header).strip().casefold() for header in CANONICAL_SESSION_HEADERS}
+NUMERIC_SESSION_KEYS = {
+    "session_number", "voice_total", "voice_valid", "chat_total", "chat_valid",
+    "ambiguous_total", "score", "countability_ruleset_version",
+}
 
 
 class SessionResultsGateway(Protocol):
@@ -229,12 +233,12 @@ class SessionResultsRepository:
             row_number: {
                 column: desired_row[column]
                 for column in canonical_columns
-                if existing_row[column] != desired_row[column]
+                if not _cell_equal(existing_row[column], desired_row[column], _column_key(column, positions))
             }
             for participant_id, (row_number, existing_row) in existing_target.items()
             if participant_id in desired_by_id
             for desired_row in [desired_by_id[participant_id]]
-            if any(existing_row[column] != desired_row[column] for column in canonical_columns)
+            if any(not _cell_equal(existing_row[column], desired_row[column], _column_key(column, positions)) for column in canonical_columns)
         }
         deletes = [row_number for participant_id, (row_number, _) in existing_target.items()
                    if participant_id not in desired_by_id]
@@ -266,7 +270,7 @@ class SessionResultsRepository:
             raise RuntimeError(f"No se pudo verificar el reemplazo de la sesión {session_number}")
         canonical_columns = [column for key, column in positions.items() if key in CANONICAL_SESSION_KEYS]
         for participant_id, expected in desired_by_id.items():
-            if any(actual[participant_id][column] != expected[column] for column in canonical_columns):
+            if any(not _cell_equal(actual[participant_id][column], expected[column], _column_key(column, positions)) for column in canonical_columns):
                 raise RuntimeError(f"No se pudo verificar el resultado de {participant_id}")
 
     def _build_session_rows(
@@ -353,6 +357,10 @@ def _header_key(value: Any) -> str:
     return str(value).strip().casefold()
 
 
+def _column_key(column: int, positions: Mapping[str, int]) -> str:
+    return next(key for key, index in positions.items() if index == column)
+
+
 def _pad(row: Sequence[Any], length: int) -> list[Any]:
     return list(row) + [""] * max(0, length - len(row))
 
@@ -369,3 +377,20 @@ def _canonical_score(value: Decimal | str | int | float) -> str:
     if score < 0 or (score * 2) != (score * 2).to_integral_value():
         raise ValueError("El score debe ser no negativo y estar en incrementos de 0.5")
     return format(score, "f")
+
+
+def _cell_equal(left: Any, right: Any, field: str | None = None) -> bool:
+    if field == "scoring_complete":
+        if isinstance(left, bool) and isinstance(right, str):
+            return right.strip().casefold() == str(left).casefold()
+        if isinstance(right, bool) and isinstance(left, str):
+            return left.strip().casefold() == str(right).casefold()
+        return left == right
+    if field in NUMERIC_SESSION_KEYS:
+        if isinstance(left, bool) or isinstance(right, bool):
+            return left == right
+        try:
+            return Decimal(str(left).strip()) == Decimal(str(right).strip())
+        except (InvalidOperation, ValueError):
+            return left == right
+    return left == right
