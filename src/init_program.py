@@ -22,12 +22,17 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / ".participation_tracker" / "programs.json"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-REQUIRED_SHEETS = ["Programa", "Sesiones", "Participantes", "Control"]
+REQUIRED_SHEETS = ["Programa", "Sesiones", "Participantes", "Ranking", "Control"]
 PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]
 SESSION_HEADERS = [
     "session_number", "session_name", "participant_id", "participant", "email",
     "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
     "score", "scoring_complete", "countability_ruleset_version",
+]
+RANKING_HEADERS = [
+    "rank", "participant_id", "participant", "email", "sessions_with_activity",
+    "voice_total", "voice_valid_total", "chat_total", "chat_valid_total",
+    "score_total", "ranking_complete",
 ]
 CONTROL_HEADERS = [
     "session_number", "session_name", "folder_id", "transcript_status",
@@ -272,6 +277,7 @@ def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict
                                          str(plan.session_count), plan.participant_mode, created_at]],
         "Sesiones": [SESSION_HEADERS],
         "Participantes": [PARTICIPANT_HEADERS] + [[p.get(h, "participant" if h == "role" else "") for h in PARTICIPANT_HEADERS] for p in plan.participants],
+        "Ranking": [RANKING_HEADERS],
         "Control": [CONTROL_HEADERS] + [[int(record["session_number"]), record["session_name"], record["folder_id"],
                                           "pending", "pending", "pending", ""]
                                          for record in session_records],
