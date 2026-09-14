@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.sync.participants import Participant, ParticipantResolver
 from src.sync.participant_repository import ParticipantRepository, decode_aliases, encode_aliases
@@ -9,8 +10,11 @@ class FakeSheetsValues:
         self.values = [list(row) for row in values]
         self.writes = []
         self.appends = []
+        self.reads = 0
+        self.interrupt_after = None
 
     def read_values(self):
+        self.reads += 1
         return [list(row) for row in self.values]
 
     def write_cells(self, start_row, start_column, values):
@@ -32,8 +36,45 @@ class FakeSheetsValues:
         self.appends.append(list(values))
         self.values.append(list(values))
 
+    def append_rows(self, values):
+        self.appends.append([list(row) for row in values])
+        for index, row in enumerate(values, 1):
+            if self.interrupt_after is not None and index > self.interrupt_after:
+                raise RuntimeError("interrupción simulada")
+            self.values.append(list(row))
+
 
 class ParticipantRepositoryTests(unittest.TestCase):
+    def test_gateway_retries_transient_http_errors_with_bound(self):
+        from src.sync.participant_repository import GoogleSheetsValuesGateway
+
+        class Error(Exception):
+            def __init__(self, status):
+                self.resp = type("Response", (), {"status": status})()
+
+        attempts = []
+        def operation():
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise Error(429)
+            return "ok"
+
+        with patch("src.sync.participant_repository.time.sleep") as sleep:
+            self.assertEqual(GoogleSheetsValuesGateway(None, "sheet")._execute(operation), "ok")
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_gateway_does_not_retry_permanent_http_errors(self):
+        from src.sync.participant_repository import GoogleSheetsValuesGateway
+
+        class Error(Exception):
+            resp = type("Response", (), {"status": 400})()
+
+        with patch("src.sync.participant_repository.time.sleep") as sleep:
+            with self.assertRaises(Error):
+                GoogleSheetsValuesGateway(None, "sheet")._execute(lambda: (_ for _ in ()).throw(Error()))
+        self.assertEqual(sleep.call_count, 0)
+
     def test_aliases_empty_round_trip(self):
         self.assertEqual(encode_aliases([]), "")
         self.assertEqual(decode_aliases(""), [])
@@ -131,6 +172,29 @@ class ParticipantRepositoryTests(unittest.TestCase):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
         ParticipantRepository(backend).upsert([Participant("p1", "Alice", aliases=["Apellido, Nombre", "Alicia"])])
         self.assertEqual(backend.values[1][3], "Apellido, Nombre\nAlicia")
+
+    def test_batch_upsert_uses_constant_reads(self):
+        backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
+        ParticipantRepository(backend).upsert([Participant(f"p{index}", f"Person {index}") for index in range(49)])
+        self.assertEqual(len(backend.values), 50)
+        self.assertEqual(backend.reads, 2)
+        self.assertEqual(len(backend.appends), 1)
+
+    def test_partial_batch_recovers_without_duplicates(self):
+        participants = [Participant(f"p{index}", f"Person {index}") for index in range(49)]
+        backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
+        backend.interrupt_after = 29
+        with self.assertRaisesRegex(RuntimeError, "interrupción"):
+            ParticipantRepository(backend).upsert(participants)
+        self.assertEqual(len(backend.values), 30)
+        backend.interrupt_after = None
+        recovery = ParticipantRepository(backend)
+        recovery.upsert(participants)
+        self.assertEqual(len(backend.values), 50)
+        self.assertEqual(len({row[0] for row in backend.values[1:]}), 49)
+        recovery.upsert(participants)
+        self.assertEqual(len(backend.values), 50)
+        self.assertEqual(len(backend.appends), 2)
 
     def test_repository_never_replaces_participant_id(self):
         backend = FakeSheetsValues([["participant_id", "nombre"], ["p1", "Alice"]])

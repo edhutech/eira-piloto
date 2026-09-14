@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Protocol
 
 from .participants import Participant, strict_name_key
@@ -41,6 +42,7 @@ class SheetsValuesGateway(Protocol):
     def read_values(self) -> list[list[Any]]: ...
     def write_cells(self, start_row: int, start_column: int, values: list[list[Any]]) -> None: ...
     def append_row(self, values: list[Any]) -> None: ...
+    def append_rows(self, values: list[list[Any]]) -> None: ...
 
 
 @dataclass
@@ -48,33 +50,49 @@ class GoogleSheetsValuesGateway:
     service: Any
     spreadsheet_id: str
     sheet_name: str = "Participantes"
+    max_attempts: int = 3
 
     def read_values(self) -> list[list[Any]]:
-        response = self.service.spreadsheets().values().get(
+        response = self._execute(lambda: self.service.spreadsheets().values().get(
             spreadsheetId=self.spreadsheet_id,
             range=f"'{self.sheet_name}'!A:ZZ",
-        ).execute()
+        ).execute())
         return response.get("values", [])
 
     def write_cells(self, start_row: int, start_column: int, values: list[list[Any]]) -> None:
         end_column = start_column + max((len(row) for row in values), default=1) - 1
         end_row = start_row + len(values) - 1
         cell_range = f"'{self.sheet_name}'!{_column_name(start_column)}{start_row}:{_column_name(end_column)}{end_row}"
-        self.service.spreadsheets().values().update(
+        self._execute(lambda: self.service.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
             range=cell_range,
             valueInputOption="RAW",
             body={"values": values},
-        ).execute()
+        ).execute())
 
     def append_row(self, values: list[Any]) -> None:
-        self.service.spreadsheets().values().append(
+        self.append_rows([values])
+
+    def append_rows(self, values: list[list[Any]]) -> None:
+        self._execute(lambda: self.service.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
             range=f"'{self.sheet_name}'!A:ZZ",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
-            body={"values": [values]},
-        ).execute()
+            body={"values": values},
+        ).execute())
+
+    def _execute(self, operation: Any) -> Any:
+        for attempt in range(self.max_attempts):
+            try:
+                return operation()
+            except Exception as exc:
+                status = getattr(getattr(exc, "resp", None), "status", None)
+                if status != 429 and not (isinstance(status, int) and status >= 500):
+                    raise
+                if attempt == self.max_attempts - 1:
+                    raise
+                time.sleep(2 ** attempt)
 
 
 class ParticipantRepository:
@@ -84,13 +102,14 @@ class ParticipantRepository:
         self.gateway = gateway
         self.headers: list[str] = []
 
-    def migrate(self) -> None:
+    def migrate(self) -> list[list[Any]]:
         values = self.gateway.read_values()
         if not values:
             self.gateway.write_cells(1, 1, [CANONICAL_PARTICIPANT_HEADERS])
-            self._verify_header(CANONICAL_PARTICIPANT_HEADERS)
+            values = self.gateway.read_values()
+            self._verify_header_values(values, CANONICAL_PARTICIPANT_HEADERS)
             self.headers = list(CANONICAL_PARTICIPANT_HEADERS)
-            return
+            return values
 
         headers = [str(value).strip() for value in values[0]]
         if not any(headers):
@@ -133,11 +152,12 @@ class ParticipantRepository:
             column = working_positions[strict_name_key(field)] + 1
             self.gateway.write_cells(row_number, column, [[value]])
         if missing or prepared:
-            self._verify_migration(working_headers, prepared)
+            values = self.gateway.read_values()
+            self._verify_migration_values(values, working_headers, prepared)
+        return values
 
     def load_records(self) -> list[dict[str, Any]]:
-        self.migrate()
-        values = self.gateway.read_values()
+        values = self.migrate()
         positions = self._positions()
         records = []
         for row in values[1:]:
@@ -155,6 +175,7 @@ class ParticipantRepository:
         existing_ids = {str(record["participant_id"]).strip() for record in records}
         positions = self._positions()
         seen = set()
+        new_rows: list[list[Any]] = []
         for participant in participants:
             _validate_participant(participant)
             if participant.participant_id in seen:
@@ -174,22 +195,23 @@ class ParticipantRepository:
             }
             for field, value in values.items():
                 row[positions[field]] = value
-            self.gateway.append_row(row)
-            verified = self.load_records()
-            if not any(str(record["participant_id"]).strip() == participant.participant_id for record in verified):
-                raise RuntimeError(f"No se pudo verificar el participante {participant.participant_id}")
+            new_rows.append(row)
             existing_ids.add(participant.participant_id)
+        if new_rows:
+            self.gateway.append_rows(new_rows)
+            verified = self.load_records()
+            missing = {row[positions["participant_id"]] for row in new_rows} - {str(record["participant_id"]).strip() for record in verified}
+            if missing:
+                raise RuntimeError("No se pudieron verificar participantes: " + ", ".join(sorted(missing)))
 
     def _positions(self) -> dict[str, int]:
         return {strict_name_key(header): index for index, header in enumerate(self.headers)}
 
-    def _verify_header(self, expected: list[str]) -> None:
-        values = self.gateway.read_values()
+    def _verify_header_values(self, values: list[list[Any]], expected: list[str]) -> None:
         if not values or values[0][:len(expected)] != expected:
             raise RuntimeError("No se pudo verificar el encabezado de Participantes")
 
-    def _verify_migration(self, headers: list[str], changes: list[tuple[int, str, str]]) -> None:
-        values = self.gateway.read_values()
+    def _verify_migration_values(self, values: list[list[Any]], headers: list[str], changes: list[tuple[int, str, str]]) -> None:
         if not values or values[0] != headers:
             raise RuntimeError("No se pudo verificar la migración de encabezados")
         positions = {strict_name_key(header): index for index, header in enumerate(headers)}
