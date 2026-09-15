@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from src.sync.participants import ParticipantResolver, ResolutionStatus, loose_name_key, strict_name_key
+from participacion.core.participants import ParticipantResolver, ResolutionStatus, loose_name_key, strict_name_key
 
 
 def event(name, identity_type="HUMAN", participant_id=None, email=None):
@@ -153,7 +153,7 @@ class ParticipantResolutionTests(unittest.TestCase):
         self.assertEqual(len(resolver.participants), 2)
 
     def test_normalized_event_contract_still_has_no_participant_id(self):
-        from src.sync.models import NormalizedEvent
+        from participacion.core.models import NormalizedEvent
         normalized = NormalizedEvent(1, "Alice", "voice", None, None, "raw", "text", "file", "line:1", "event")
         self.assertFalse(hasattr(normalized, "participant_id"))
 

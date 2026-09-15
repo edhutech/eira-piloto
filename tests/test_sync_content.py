@@ -1,19 +1,19 @@
 import unittest
 from pathlib import Path
 
-from src.sync.content import ContentArtifact, content_hash, extract_google_doc_text
-from src.sync.models import DriveFile
-from src.sync.parsers.docx import DocxParser
-from src.sync.parsers.google_docs import GoogleDocsParser
-from src.sync.parsers.sbv import SbvParser
-from src.sync.parsers.txt import TxtParser
-from src.sync.parsers.vtt import VttParser
+from participacion.adapters.google.content import ContentArtifact, content_hash, extract_google_doc_text
+from participacion.core.models import SourceArtifact
+from participacion.adapters.parsers.docx import DocxParser
+from participacion.adapters.parsers.google_docs import GoogleDocsParser
+from participacion.adapters.parsers.sbv import SbvParser
+from participacion.adapters.parsers.txt import TxtParser
+from participacion.adapters.parsers.vtt import VttParser
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def file_meta(name, mime_type="text/plain"):
-    return DriveFile(file_id=f"id-{name}", name=name, mime_type=mime_type)
+def file_meta(name, media_type="text/plain"):
+    return SourceArtifact(artifact_id=f"id-{name}", name=name, media_type=media_type)
 
 
 class ContentAndParserTests(unittest.TestCase):
@@ -132,7 +132,7 @@ class ContentAndParserTests(unittest.TestCase):
         result = TxtParser().parse(file_meta("recognizable.txt"), (FIXTURES / "recognizable.txt").read_text(), 7)
         event = result.events[0]
         self.assertIsInstance(event.session_number, int)
-        self.assertEqual(event.source_file_id, "id-recognizable.txt")
+        self.assertEqual(event.source_artifact_id, "id-recognizable.txt")
         self.assertIn(event.channel, {"voice", "chat"})
         self.assertTrue(hasattr(event, "timestamp_raw"))
         self.assertTrue(hasattr(event, "timestamp_seconds"))
@@ -148,8 +148,8 @@ class ContentAndParserTests(unittest.TestCase):
         self.assertEqual(first.event_id, second.event_id)
 
     def test_content_artifact_preserves_metadata_and_kind(self):
-        artifact = ContentArtifact(file=file_meta("doc"), content="texto", content_kind="text", content_hash=content_hash("texto"))
-        self.assertEqual(artifact.file.file_id, "id-doc")
+        artifact = ContentArtifact(artifact=file_meta("doc"), content="texto", content_kind="text", content_hash=content_hash("texto"))
+        self.assertEqual(artifact.artifact.artifact_id, "id-doc")
         self.assertEqual(artifact.content_kind, "text")
 
 

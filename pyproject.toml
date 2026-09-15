@@ -10,9 +10,9 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
-participacion-sync = "src.sync.cli:main"
+participacion-sync = "participacion.cli.main:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*"]
+where = ["src"]
+include = ["participacion*"]
 namespaces = true

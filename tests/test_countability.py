@@ -2,7 +2,7 @@ import unittest
 from collections import Counter
 from types import SimpleNamespace
 
-from src.sync.countability import CountabilityStatus, classify_event
+from participacion.core.countability import CountabilityStatus, classify_event
 
 
 def event(name, identity_type="HUMAN", event_id="event-1", participant_id=None, channel="voice", context_ambiguous=False):

@@ -1,9 +1,9 @@
 import unittest
 from decimal import Decimal
 
-from src.sync.participants import Participant
-from src.sync.scoring import ParticipantSessionScore
-from src.sync.ranking import ProgramRanking, build_program_ranking, top_n
+from participacion.core.participants import Participant
+from participacion.core.scoring import ParticipantSessionScore
+from participacion.core.ranking import ProgramRanking, build_program_ranking, top_n
 
 
 def participant(participant_id, name=None, role="participant"):

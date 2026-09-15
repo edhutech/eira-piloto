@@ -2,10 +2,10 @@ import unittest
 from decimal import Decimal
 from types import SimpleNamespace
 
-from src.sync.models import SessionRecord
-from src.sync.participants import Participant
-from src.sync.scoring import ParticipantSessionScore
-from src.sync.tracking_repository import TrackingParticipant, TrackingRepository, TrackingSession, TrackingView, build_tracking_view, tracking_values
+from participacion.core.models import SessionRecord
+from participacion.core.participants import Participant
+from participacion.core.scoring import ParticipantSessionScore
+from participacion.application.tracking import TrackingParticipant, TrackingRepository, TrackingSession, TrackingView, build_tracking_view, tracking_values
 
 
 class FakeGateway:

@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 
-from src.sync.sheet_styling import GoogleSheetStyler, PALETTE
+from participacion.adapters.google.sheets.styling import GoogleSheetStyler, PALETTE
 
 
 class Request:

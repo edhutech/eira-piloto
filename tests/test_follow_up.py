@@ -1,11 +1,11 @@
 from decimal import Decimal
 import unittest
 
-from src.sync.follow_up import (FollowUpLevel, FollowUpReasonCode,
+from participacion.addons.follow_up.follow_up import (FollowUpLevel, FollowUpReasonCode,
                                 build_program_follow_up)
-from src.sync.models import SessionRecord
-from src.sync.participants import Participant
-from src.sync.scoring import ParticipantSessionScore
+from participacion.core.models import SessionRecord
+from participacion.core.participants import Participant
+from participacion.core.scoring import ParticipantSessionScore
 
 
 def score(session, pid, voice=0, chat=0, total=None):

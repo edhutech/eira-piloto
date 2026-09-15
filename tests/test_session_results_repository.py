@@ -1,8 +1,8 @@
 import unittest
 from decimal import Decimal
 
-from src.sync.scoring import ParticipantSessionScore
-from src.sync.session_results_repository import (
+from participacion.core.scoring import ParticipantSessionScore
+from participacion.adapters.google.sheets.session_results import (
     CANONICAL_SESSION_HEADERS,
     GoogleSheetsSessionResultsGateway,
     ParticipantSnapshot,
@@ -383,7 +383,7 @@ class GoogleSheetsSessionResultsGatewayTests(unittest.TestCase):
             with self.subTest(status=status):
                 service = FakeGoogleService([["header"]])
                 service.errors = [HttpError(status), None]
-                with patch("src.sync.participant_repository.time.sleep") as sleep:
+                with patch("participacion.adapters.google.retry.time.sleep") as sleep:
                     self.assertEqual(self.gateway(service).read_values(), [["header"]])
                 self.assertEqual(sleep.call_count, 1)
 
@@ -391,7 +391,7 @@ class GoogleSheetsSessionResultsGatewayTests(unittest.TestCase):
         from unittest.mock import patch
         service = FakeGoogleService()
         service.errors = [HttpError(400), None]
-        with patch("src.sync.participant_repository.time.sleep") as sleep:
+        with patch("participacion.adapters.google.retry.time.sleep") as sleep:
             with self.assertRaises(HttpError):
                 self.gateway(service).read_values()
         self.assertEqual(sleep.call_count, 0)

@@ -1,10 +1,10 @@
 import unittest
 from decimal import Decimal
 
-from src.init_program import RANKING_HEADERS, REQUIRED_SHEETS, _sheet_values
-from src.sync.participants import Participant
-from src.sync.ranking import ProgramRanking, ProgramRankingEntry
-from src.sync.ranking_repository import (
+from participacion.cli.init import RANKING_HEADERS, REQUIRED_SHEETS, _sheet_values
+from participacion.core.participants import Participant
+from participacion.core.ranking import ProgramRanking, ProgramRankingEntry
+from participacion.adapters.google.sheets.ranking import (
     GoogleSheetsRankingGateway,
     RankingRepository,
 )
@@ -242,12 +242,12 @@ class RankingGatewayTests(unittest.TestCase):
         for status in (429, 503):
             service = FakeGoogleService()
             service.errors = [HttpError(status), None]
-            with self.subTest(status=status), patch("src.sync.participant_repository.time.sleep") as sleep:
+            with self.subTest(status=status), patch("participacion.adapters.google.retry.time.sleep") as sleep:
                 self.assertEqual(GoogleSheetsRankingGateway(service, "sheet-id").read_values(), [])
                 self.assertEqual(sleep.call_count, 1)
         service = FakeGoogleService()
         service.errors = [HttpError(400), None]
-        with patch("src.sync.participant_repository.time.sleep") as sleep:
+        with patch("participacion.adapters.google.retry.time.sleep") as sleep:
             with self.assertRaises(HttpError):
                 GoogleSheetsRankingGateway(service, "sheet-id").read_values()
             self.assertEqual(sleep.call_count, 0)

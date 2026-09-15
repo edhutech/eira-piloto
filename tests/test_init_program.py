@@ -1,6 +1,6 @@
 import unittest
 
-from src.init_program import (
+from participacion.cli.init import (
     build_plan,
     extract_folder_id,
     session_folder_name,
@@ -70,7 +70,7 @@ class InitProgramTests(unittest.TestCase):
         self.assertNotEqual(plan.current_folder_name, plan.program_name)
 
     def test_sheet_sessions_has_headers_only_and_control_numbers_are_integers(self):
-        from src.init_program import _sheet_values
+        from participacion.cli.init import _sheet_values
 
         plan = build_plan(
             program_name="Programa A", folder_id="root-id", folder_url="url",
@@ -110,7 +110,7 @@ class InitProgramTests(unittest.TestCase):
         self.assertEqual(plan.participants, [])
 
     def test_new_participant_sheet_uses_canonical_contract(self):
-        from src.init_program import PARTICIPANT_HEADERS
+        from participacion.cli.init import PARTICIPANT_HEADERS
         self.assertEqual(PARTICIPANT_HEADERS, ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"])
 
 

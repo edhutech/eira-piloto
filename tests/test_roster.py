@@ -1,7 +1,7 @@
 import unittest
 
-from src.sync.participants import Participant
-from src.sync.roster import (RosterAction, RosterImporter, RosterRecord,
+from participacion.core.participants import Participant
+from participacion.application.roster import (RosterAction, RosterImporter, RosterRecord,
                               _stable_official_id)
 
 

@@ -4,25 +4,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.sync.models import DriveFile, FileChange, FileStatus, ProgramInspection, ProgramRecord, SessionInspection, SessionRecord
-from src.sync.program_runner import FileStateStore, ProgramDependencies, ProgramRunner
-from src.sync.ranking import build_program_ranking
-from src.sync.session_processor import SessionProcessResult, SessionProcessStatus
-from src.sync.state import empty_state, file_fingerprint, load_state
-from src.sync.participants import Participant
-from src.sync.scoring import ParticipantSessionScore
+from participacion.core.models import SourceArtifact, FileChange, FileStatus, ProgramInspection, ProgramRecord, ProviderRef, SessionInspection, SessionRecord
+from participacion.adapters.filesystem.state import FileStateStore
+from participacion.application.program_runner import ProgramDependencies, ProgramRunner
+from participacion.core.ranking import build_program_ranking
+from participacion.application.session_processor import SessionProcessResult, SessionProcessStatus
+from participacion.adapters.filesystem.state import empty_state, file_fingerprint, load_state
+from participacion.core.participants import Participant
+from participacion.core.scoring import ParticipantSessionScore
 from decimal import Decimal
 
 
 def program():
     sessions = tuple(SessionRecord(i, f"{i:02d} - Sesión {i}", f"s{i}") for i in range(1, 3))
-    return ProgramRecord("Programa", "root", "url", 2, "auto", "sheet", sessions)
+    return ProgramRecord("root", "Programa", 2, "auto", ProviderRef("google_drive", "root"), ProviderRef("google_sheets", "sheet"), sessions)
 
 
 def inspection_for(p, fingerprints=("a", "b")):
     sessions = []
     for number, fingerprint in enumerate(fingerprints, 1):
-        file = DriveFile(f"f{number}", f"file{number}")
+        file = SourceArtifact(f"f{number}", f"file{number}")
         change = FileChange(file, FileStatus.NEW, fingerprint)
         sessions.append(SessionInspection(p.sessions[number - 1].__class__(number, f"{number:02d} - Sesión {number}", f"s{number}"), [file], [change]))
     return ProgramInspection(p, sessions)

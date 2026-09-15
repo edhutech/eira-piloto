@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from src.sync.participants import Participant, ParticipantResolver
-from src.sync.participant_repository import ParticipantRepository, decode_aliases, encode_aliases
+from participacion.core.participants import Participant, ParticipantResolver
+from participacion.adapters.google.sheets.participants import ParticipantRepository, decode_aliases, encode_aliases
 
 
 class FakeSheetsValues:
@@ -46,7 +46,7 @@ class FakeSheetsValues:
 
 class ParticipantRepositoryTests(unittest.TestCase):
     def test_gateway_retries_transient_http_errors_with_bound(self):
-        from src.sync.participant_repository import GoogleSheetsValuesGateway
+        from participacion.adapters.google.sheets.participants import GoogleSheetsValuesGateway
 
         class Error(Exception):
             def __init__(self, status):
@@ -59,18 +59,18 @@ class ParticipantRepositoryTests(unittest.TestCase):
                 raise Error(429)
             return "ok"
 
-        with patch("src.sync.participant_repository.time.sleep") as sleep:
+        with patch("participacion.adapters.google.retry.time.sleep") as sleep:
             self.assertEqual(GoogleSheetsValuesGateway(None, "sheet")._execute(operation), "ok")
         self.assertEqual(len(attempts), 3)
         self.assertEqual(sleep.call_count, 2)
 
     def test_gateway_does_not_retry_permanent_http_errors(self):
-        from src.sync.participant_repository import GoogleSheetsValuesGateway
+        from participacion.adapters.google.sheets.participants import GoogleSheetsValuesGateway
 
         class Error(Exception):
             resp = type("Response", (), {"status": 400})()
 
-        with patch("src.sync.participant_repository.time.sleep") as sleep:
+        with patch("participacion.adapters.google.retry.time.sleep") as sleep:
             with self.assertRaises(Error):
                 GoogleSheetsValuesGateway(None, "sheet")._execute(lambda: (_ for _ in ()).throw(Error()))
         self.assertEqual(sleep.call_count, 0)

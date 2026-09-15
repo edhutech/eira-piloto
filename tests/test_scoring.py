@@ -2,8 +2,8 @@ import unittest
 from decimal import Decimal
 from types import SimpleNamespace
 
-from src.sync.countability import CountabilityDecision, CountabilityStatus
-from src.sync.scoring import ParticipantSessionScore, score_events
+from participacion.core.countability import CountabilityDecision, CountabilityStatus
+from participacion.core.scoring import ParticipantSessionScore, score_events
 
 
 def event(event_id, participant_id, channel, status=CountabilityStatus.COUNT, session_number=1, identity_type="HUMAN", role="participant"):

@@ -3,7 +3,7 @@ import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
-from src.sync.cli import main
+from participacion.cli import main
 
 
 class FakeRunner:

@@ -2,10 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.sync.drive_discovery import discover_changes, select_programs
-from src.sync.models import FileStatus
-from src.sync.registry import load_programs
-from src.sync.state import empty_state, file_fingerprint, load_state, save_state
+from participacion.adapters.google.source import discover_changes, select_programs
+from participacion.core.models import FileStatus
+from participacion.application.registry import load_programs
+from participacion.adapters.filesystem.state import empty_state, file_fingerprint, load_state, save_state
 
 
 PROGRAMS = {
@@ -134,9 +134,9 @@ def load_programs_from_dict(data):
         return load_programs(path)
 
 
-def state_with_file(program_id, session_id, file_id, metadata):
+def state_with_file(program_id, session_id, artifact_id, metadata):
     return {"version": 1, "programs": {program_id: {"sessions": {
-        session_id: {"files": {file_id: file_fingerprint(metadata)}}
+        session_id: {"files": {artifact_id: file_fingerprint(metadata)}}
     }}}}
 
 
