@@ -19,7 +19,8 @@ from ..application.session_processor import SessionProcessor
 from ..adapters.google.sheets.session_results import GoogleSheetsSessionResultsGateway, SessionResultsRepository
 from ..adapters.google.sheets.follow_up import (ControlRepository, FollowUpRepository,
                                     GoogleSheetsFollowUpGateway)
-from ..application.notifications import Notification, NotificationLevel, notify_program_result
+from ..application.events import ApplicationEvent
+from ..application.notifications import notify_events
 from ..addons.follow_up.addon import IndividualFollowUpAddon
 from ..adapters.notifications.none import NoneNotifier
 from ..adapters.notifications.notify_send import NotifySendNotifier
@@ -142,7 +143,7 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
             try:
                 notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
                 for result in results:
-                    notify_program_result(notifier, result)
+                    notify_events(notifier, result.events)
             except Exception as exc:
                 logger.warning("notification failed: %s", exc)
         return 1 if any(result.sessions_failed or result.errors for result in results) else 0
@@ -151,11 +152,9 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
         if not args.no_notify:
             try:
                 notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
-                notifier.notify(Notification(
-                    "Error en participación",
-                    f"{args.program or 'participacion-sync'} terminó con errores",
-                    NotificationLevel.CRITICAL,
-                ))
+                notify_events(notifier, (ApplicationEvent(
+                    "runtime.failed", "", args.program or "participacion-sync", {},
+                ),))
             except Exception as notify_exc:
                 logger.warning("notification failed: %s", notify_exc)
         return 1

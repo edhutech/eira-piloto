@@ -7,6 +7,7 @@ from unittest.mock import patch
 from participacion.core.models import SourceArtifact, FileChange, FileStatus, ProgramInspection, ProgramRecord, ProviderRef, SessionInspection, SessionRecord
 from participacion.adapters.filesystem.state import FileStateStore
 from participacion.application.program_runner import ProgramDependencies, ProgramRunner
+from participacion.application.events import AddonResult
 from participacion.core.ranking import build_program_ranking
 from participacion.application.session_processor import SessionProcessResult, SessionProcessStatus
 from participacion.adapters.filesystem.state import empty_state, file_fingerprint, load_state
@@ -65,13 +66,14 @@ class FakeRanking:
 
 
 class ProgramRunnerTests(unittest.TestCase):
-    def make_runner(self, state, inspections, processor=None, ranking=None):
+    def make_runner(self, state, inspections, processor=None, ranking=None, addons=()):
         p = program()
         processor = processor or FakeProcessor()
         participants = FakeParticipants()
         sessions = FakeSessionResults()
         ranking = ranking or FakeRanking()
-        dependencies = ProgramDependencies(processor, participants, sessions, ranking)
+        dependencies = ProgramDependencies(processor, participants, sessions, ranking,
+                                            addons=addons)
         store = SimpleNamespace(value=state, saves=[])
         store.load = lambda: store.value
         def save(value):
@@ -150,6 +152,23 @@ class ProgramRunnerTests(unittest.TestCase):
         self.assertEqual(len(ranking.calls), 1)
         self.assertEqual(result.ranking_entries, 1)
         self.assertFalse(result.ranking_changed)
+
+    def test_addon_only_change_does_not_emit_program_updated(self):
+        class Addon:
+            addon_id = "test.addon"
+            def run(self, context):
+                return AddonResult(self.addon_id, changed=True)
+
+        p = program()
+        outcomes = {
+            1: SessionProcessResult(1, SessionProcessStatus.PROCESSED, changed=False),
+            2: SessionProcessResult(2, SessionProcessStatus.PROCESSED, changed=False),
+        }
+        runner, _, _, _ = self.make_runner(
+            empty_state(), inspection_for(p), FakeProcessor(outcomes), addons=(Addon(),))
+        result = runner.run()[0]
+        self.assertTrue(result.addon_results[0].changed)
+        self.assertNotIn("program.updated", {event.event_type for event in result.events})
 
     def test_program_selection_accepts_id_or_unique_name(self):
         p = program()

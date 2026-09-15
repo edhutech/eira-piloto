@@ -20,7 +20,7 @@ class CliTests(unittest.TestCase):
         runner = FakeRunner([SimpleNamespace(
             program_name="Programa", session_results=[], ranking_changed=False,
             sessions_processed=1, sessions_skipped=0, sessions_incomplete=0,
-            sessions_needs_review=0, sessions_failed=0, errors=(),
+            sessions_needs_review=0, sessions_failed=0, errors=(), events=(),
         )])
         output = io.StringIO()
         with redirect_stdout(output):
@@ -41,7 +41,7 @@ class CliTests(unittest.TestCase):
             runner = FakeRunner([SimpleNamespace(
                 program_name="Programa", session_results=[], ranking_changed=False,
                 sessions_processed=0, sessions_skipped=0, sessions_incomplete=0,
-                sessions_needs_review=0, sessions_failed=failed, errors=errors,
+                sessions_needs_review=0, sessions_failed=failed, errors=errors, events=(),
             )])
             with redirect_stdout(io.StringIO()):
                 code = main([], runner_factory=lambda programs, state, r=runner: r)

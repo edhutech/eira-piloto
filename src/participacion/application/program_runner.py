@@ -169,13 +169,23 @@ class ProgramRunner:
         counts = {status: sum(item.status is status for item in session_results)
                   for status in SessionProcessStatus}
         if counts[SessionProcessStatus.FAILED] or errors:
-            events.append(ApplicationEvent("program.failed", pid, program.program_name, {}))
+            events.append(ApplicationEvent("program.failed", pid, program.program_name, {
+                "sessions_failed": counts[SessionProcessStatus.FAILED],
+                "error_count": len(errors),
+            }))
         elif counts[SessionProcessStatus.INCOMPLETE] or counts[SessionProcessStatus.NEEDS_REVIEW]:
-            events.append(ApplicationEvent("program.requires_attention", pid, program.program_name, {}))
+            events.append(ApplicationEvent("program.requires_attention", pid, program.program_name, {
+                "incomplete": counts[SessionProcessStatus.INCOMPLETE],
+                "needs_review": counts[SessionProcessStatus.NEEDS_REVIEW],
+            }))
         elif (sum(item.changed for item in session_results) > 0 or
-              ranking_changed or tracking_changed or
-              any(item.changed for item in addon_results)):
-            events.append(ApplicationEvent("program.updated", pid, program.program_name, {}))
+              ranking_changed or tracking_changed):
+            events.append(ApplicationEvent("program.updated", pid, program.program_name, {
+                "sessions_processed": counts[SessionProcessStatus.PROCESSED],
+                "participants_created": sum(item.participants_created for item in session_results),
+                "ranking_changed": ranking_changed,
+                "tracking_changed": tracking_changed,
+            }))
         return ProgramRunResult(
             program_id=pid, root_source_ref=program.source.ref, program_name=program.program_name,
             sessions_total=len(session_results), sessions_processed=counts[SessionProcessStatus.PROCESSED],
