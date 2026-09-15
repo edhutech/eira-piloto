@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from ..core.participants import Participant, strict_name_key
 
@@ -48,10 +46,6 @@ class RosterPlan:
     @property
     def creates(self) -> tuple[RosterPlanItem, ...]:
         return tuple(item for item in self.items if item.action == RosterAction.CREATE)
-
-
-class GoogleRosterSource(Protocol):
-    def read_values(self) -> list[list[Any]]: ...
 
 
 class RosterImporter:
@@ -164,33 +158,6 @@ def _needs_update(person: Participant, record: RosterRecord) -> bool:
 def _stable_official_id(record: RosterRecord) -> str:
     key = record.correo.strip().casefold() or strict_name_key(record.nombre)
     return "participant_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
-
-
-def read_csv_roster(path: str | Path) -> list[RosterRecord]:
-    with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
-        return roster_records_from_rows(list(csv.reader(handle)))
-
-
-def read_xlsx_roster(path: str | Path) -> list[RosterRecord]:
-    try:
-        import openpyxl
-    except ImportError as exc:
-        raise RuntimeError("XLSX requiere openpyxl instalado en el entorno del proyecto") from exc
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    try:
-        sheet = workbook.active
-        return roster_records_from_rows(
-            [] if sheet is None else [list(row) for row in sheet.iter_rows(values_only=True)]
-        )
-    finally:
-        workbook.close()
-
-
-def read_google_roster(source: GoogleRosterSource) -> list[RosterRecord]:
-    values = source.read_values()
-    if not values:
-        return []
-    return roster_records_from_rows(values)
 
 
 def roster_records_from_rows(rows: Sequence[Sequence[Any]]) -> list[RosterRecord]:

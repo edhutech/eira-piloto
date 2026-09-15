@@ -1,47 +1,114 @@
-# Participation Sync
+# participacion-agent
 
-One-shot synchronization for registered participation programs.
+Deterministic, one-shot participation tracking for turning session evidence
+(voice and chat) into auditable results, cumulative follow-up, and optional
+longitudinal signals.
 
-Uso manual:
+## What it is
 
-    participacion-sync
+- A deterministic participation tracker.
+- Provider-neutral Core and Application layers.
+- Google Workspace is the currently included source/storage adapter.
+- No LLM is required at runtime.
 
-Programa específico:
+## What it is not
 
-    participacion-sync --program "Prueba Participación"
+It does not infer attendance, grade, assess learning, or diagnose or predict
+dropout. A valid voice or chat event is evidence of participation only.
 
-Servicio de usuario:
+## How it works
 
-    systemctl --user status participacion-sync.service
-    systemctl --user start participacion-sync.service
+    evidence -> parse -> normalize -> identity -> countability -> score
+             -> results -> ranking/tracking -> optional add-ons
 
-Logs:
+Supported evidence formats: Google Docs, DOCX, VTT, SBV, and TXT.
 
-    journalctl --user -u participacion-sync.service
+Scoring is intentionally simple: valid voice = 1, valid chat = 0.5, and a
+program score is the accumulated sum. There is no relevance or quality metric.
 
-Deshabilitar:
+Participant modes are `auto`, `import`, and `official`. Official rosters use
+strict deterministic matching and surface ambiguity for human review.
 
-    systemctl --user disable participacion-sync.service
+## Follow-up add-on
 
-El servicio es `Type=oneshot`: se ejecuta una vez al iniciar la sesión del
-usuario y termina. No usa timer, daemon, polling ni cron.
+The optional Individual Follow-up add-on uses an official roster, eligible
+sessions, frequency over the last four sessions, and the levels Normal,
+Observar, and Crítico. It is a human-review signal, not an assessment or
+attendance decision.
 
-Seguimiento individual longitudinal
+## Installation
 
-Los programas en modo `official` usan una nómina oficial y generan la pestaña
-`Seguimiento individual`. La importación de nómina debe ejecutarse primero en
-DRY-RUN y solo después, con revisión humana explícita, en APPLY. La
-reconciliación usa correo exacto, nombre exacto y alias exacto; las
-ambigüedades producen `NEEDS_REVIEW` y nunca se fusionan automáticamente.
+This project is not published on PyPI. From a clone:
 
-En `Seguimiento individual`:
+    python -m venv .venv
+    . .venv/bin/activate             # Windows: .venv\\Scripts\\activate
+    pip install -e ".[google,xlsx]"
 
-- `●` significa participación registrada en una sesión elegible procesada.
-- `○` significa que no existe participación registrada; no significa que la
-  persona haya asistido y no haya participado.
-- `Normal`, `Observar` y `Crítico` son señales de participación para priorizar
-  revisión humana. No son calificaciones, aprobación, sanción, evaluación de
-  habilidades ni diagnóstico o predictor de deserción.
+For development, install `.[dev,google,xlsx]`.
 
-Sin una nómina oficial no se genera una clasificación longitudinal para los
-programas `auto`; el estado operativo es `WAITING_FOR_OFFICIAL_ROSTER`.
+## Google setup
+
+Create a Desktop OAuth client in a Google Cloud project, enable Google Drive,
+Google Sheets, and Google Docs APIs, then authorize:
+
+    participacion-google-auth --client-secret /path/to/client_secret.json
+
+The command stores an authorized-user token at
+`~/.config/participacion/google_token.json` by default. Override it with
+`--token` or `PARTICIPACION_GOOGLE_TOKEN`. The client secret can also be set
+with `PARTICIPACION_GOOGLE_CLIENT_SECRET`. Never commit either file.
+
+## Quick start
+
+1. Run `participacion-google-auth`.
+2. Run `participacion-init` and confirm its dry-run plan once.
+3. Put or upload session evidence in the prepared folders.
+4. Run `participacion-sync`.
+
+Commands:
+
+- `participacion-google-auth` — OAuth Desktop installed-app flow.
+- `participacion-init` — validate and initialize a program.
+- `participacion-sync` — process one or all registered programs.
+- `participacion-sync --notifier none|stdout|notify-send` — notification backend.
+
+All commands support `--help` without making Google calls. Google operations
+require `participacion-agent[google]`; XLSX roster input requires
+`participacion-agent[xlsx]`.
+
+## Configuration and state
+
+- `PARTICIPACION_CONFIG_DIR` — default `~/.config/participacion`.
+- `PARTICIPACION_STATE_DIR` — default `~/.local/state/participacion`.
+- `PARTICIPACION_GOOGLE_TOKEN` — authorized-user token path.
+- `PARTICIPACION_GOOGLE_CLIENT_SECRET` — Desktop client secret path.
+- `PARTICIPACION_NOTIFIER` — `none` (default), `stdout`, or `notify-send`.
+
+The application is one-shot. External scheduling is optional; see
+[docs/scheduling.md](docs/scheduling.md).
+
+## Architecture
+
+Core contains provider-neutral models and deterministic rules. Application
+orchestrates use cases and ports. Add-ons extend capabilities through generic
+contracts. Adapters implement Google, filesystem, parser, and notification
+integration. See [docs/architecture.md](docs/architecture.md).
+
+## Notifications and privacy
+
+Notification events contain aggregate, non-PII data only. Transcripts and
+chats can contain sensitive personal information; users are responsible for
+access and retention policies. OAuth tokens are credentials and must be
+protected. No LLM processes evidence at runtime.
+
+## Development
+
+    pip install -e ".[dev,google,xlsx]"
+    python -m unittest discover -s tests -q
+
+Architecture rules are tested. Do not place provider SDKs, credentials, or
+personal data in Core, Application, or fixtures.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

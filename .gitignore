@@ -1,5 +1,20 @@
 .participation_tracker/
 
-# Python cache
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.env
+.env.*
+!*.example
+
+# Runtime credentials and OAuth artifacts
+google_token.json
+client_secret*.json
+credentials*.json
