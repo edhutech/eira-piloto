@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
-from .participants import Participant, strict_name_key
+from .participants import Participant, Role, strict_name_key
 
 CANONICAL_PARTICIPANT_HEADERS = [
     "participant_id", "nombre", "correo", "aliases", "role", "source", "status",
+    "enrollment_status", "start_session", "end_session",
 ]
 PARTICIPANT_ROLES = {"participant", "facilitator", "other"}
 
@@ -218,6 +219,9 @@ class ParticipantRepository:
                 "role": participant.role,
                 "source": participant.source,
                 "status": participant.status,
+                "enrollment_status": participant.enrollment_status,
+                "start_session": participant.start_session,
+                "end_session": participant.end_session if participant.end_session is not None else "",
             }
             for field, value in values.items():
                 row[positions[field]] = value
@@ -229,6 +233,26 @@ class ParticipantRepository:
             missing = {row[positions["participant_id"]] for row in new_rows} - {str(record["participant_id"]).strip() for record in verified}
             if missing:
                 raise RuntimeError("No se pudieron verificar participantes: " + ", ".join(sorted(missing)))
+
+    def update_fields(self, updates: dict[str, dict[str, Any]]) -> None:
+        records = self.load_records()
+        positions = self._positions()
+        by_id = {str(record["participant_id"]).strip(): index for index, record in enumerate(records, 2)}
+        for participant_id, fields in updates.items():
+            row_number = by_id.get(participant_id)
+            if row_number is None:
+                raise KeyError(f"participant_id no encontrado: {participant_id}")
+            for field, value in fields.items():
+                if field not in positions:
+                    raise ValueError(f"Campo de roster no soportado: {field}")
+                self.gateway.write_cells(row_number, positions[field] + 1, [[value]])
+        if updates:
+            verified = self.load_records()
+            for participant_id, fields in updates.items():
+                row = next(record for record in verified if str(record["participant_id"]).strip() == participant_id)
+                for field, expected in fields.items():
+                    if str(row.get(field, "")) != str(expected):
+                        raise RuntimeError(f"No se pudo verificar actualización de roster: {participant_id}/{field}")
 
     def _positions(self) -> dict[str, int]:
         return {strict_name_key(header): index for index, header in enumerate(self.headers)}
@@ -263,7 +287,60 @@ def _record_to_participant(record: dict[str, Any]) -> Participant:
     role = str(record.get("role", "participant")).strip() or "participant"
     if role not in PARTICIPANT_ROLES:
         raise ValueError(f"Rol de participante inválido: {role}")
-    return Participant(participant_id, name, str(record.get("correo", "")).strip(), list(aliases), role, str(record.get("source", "")), str(record.get("status", "")))
+    end_raw = str(record.get("end_session", "")).strip()
+    enrollment_status = str(record.get("enrollment_status", "active")).strip() or "active"
+    start_session, start_valid = _parse_session_number_safe(record.get("start_session", 1), 1)
+    end_session, end_valid = _parse_optional_session_number_safe(end_raw)
+    config_valid = start_valid and end_valid and enrollment_status in {"active", "inactive"}
+    if enrollment_status == "active" and end_session is not None:
+        config_valid = False
+    if enrollment_status == "inactive" and end_session is None:
+        config_valid = False
+    if end_session is not None and end_session < start_session:
+        config_valid = False
+    return Participant(
+        participant_id, name, str(record.get("correo", "")).strip(), list(aliases), cast(Role, role),
+        str(record.get("source", "")), str(record.get("status", "")),
+        enrollment_status,
+        start_session,
+        end_session,
+        config_valid,
+    )
+
+
+def _parse_session_number(value: Any, default: int | None = None) -> int:
+    text = str(value if value is not None else "").strip()
+    if not text and default is not None:
+        return default
+    try:
+        number = int(float(text))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"start_session inválido: {value}") from exc
+    if number < 1:
+        raise ValueError(f"start_session inválido: {value}")
+    return number
+
+
+def _parse_optional_session_number(value: Any) -> int | None:
+    text = str(value or "").strip()
+    return None if not text else _parse_session_number(text)
+
+
+def _parse_session_number_safe(value: Any, default: int) -> tuple[int, bool]:
+    try:
+        return _parse_session_number(value, default), True
+    except ValueError:
+        return default, False
+
+
+def _parse_optional_session_number_safe(value: Any) -> tuple[int | None, bool]:
+    text = str(value or "").strip()
+    if not text:
+        return None, True
+    try:
+        return _parse_session_number(text), True
+    except ValueError:
+        return None, False
 
 
 def _validate_participant(participant: Participant) -> None:

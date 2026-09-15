@@ -89,6 +89,14 @@ def build_program_notification(result: Any) -> DesktopNotification | None:
             body = f"{attention} sesiones requieren atención"
         return DesktopNotification("Participación requiere atención", body, NotificationLevel.WARNING)
 
+    critical_transitions = int(getattr(result, "follow_up_critical_transitions", 0))
+    if critical_transitions:
+        return DesktopNotification(
+            "Seguimiento requiere atención",
+            f"{critical_transitions} estudiante{'s' if critical_transitions != 1 else ''} {'pasaron' if critical_transitions != 1 else 'pasó'} a Crítico",
+            NotificationLevel.WARNING,
+        )
+
     changed = (int(getattr(result, "session_results_changed", 0)) > 0
                or int(getattr(result, "participants_created", 0)) > 0
                or bool(getattr(result, "ranking_changed", False))

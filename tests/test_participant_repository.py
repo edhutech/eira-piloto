@@ -98,7 +98,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
         backend = FakeSheetsValues([["nombre", "correo", "aliases", "source", "status"], ["Alice", "a@example.com", "Alicia", "import", "new"]])
         repository = ParticipantRepository(backend)
         participants = repository.load()
-        self.assertEqual(repository.headers, ["nombre", "correo", "aliases", "source", "status", "participant_id", "role"])
+        self.assertEqual(repository.headers, ["nombre", "correo", "aliases", "source", "status", "participant_id", "role", "enrollment_status", "start_session", "end_session"])
         self.assertEqual(participants[0].nombre, "Alice")
         self.assertTrue(participants[0].participant_id)
         self.assertEqual(participants[0].role, "participant")
@@ -145,7 +145,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"], ["p1", "Canonical", "manual@example.com", "Alias manual", "participant", "import", "verified"]])
         repository = ParticipantRepository(backend)
         repository.upsert([Participant("p1", "Observed", "other@example.com", ["Other"], "facilitator", "auto", "unverified")])
-        self.assertEqual(backend.writes, [])
+        self.assertEqual(backend.writes, [(1, 8, [["enrollment_status", "start_session", "end_session"]])])
         self.assertEqual(backend.appends, [])
         self.assertEqual(backend.values[1], ["p1", "Canonical", "manual@example.com", "Alias manual", "participant", "import", "verified"])
 
@@ -177,7 +177,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
         ParticipantRepository(backend).upsert([Participant(f"p{index}", f"Person {index}") for index in range(49)])
         self.assertEqual(len(backend.values), 50)
-        self.assertEqual(backend.reads, 2)
+        self.assertEqual(backend.reads, 3)
         self.assertEqual(len(backend.appends), 1)
 
     def test_partial_batch_recovers_without_duplicates(self):

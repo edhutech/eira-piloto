@@ -111,7 +111,7 @@ class InitProgramTests(unittest.TestCase):
 
     def test_new_participant_sheet_uses_canonical_contract(self):
         from src.init_program import PARTICIPANT_HEADERS
-        self.assertEqual(PARTICIPANT_HEADERS, ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"])
+        self.assertEqual(PARTICIPANT_HEADERS, ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"])
 
 
 if __name__ == "__main__":

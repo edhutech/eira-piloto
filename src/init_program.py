@@ -22,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / ".participation_tracker" / "programs.json"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-REQUIRED_SHEETS = ["Seguimiento", "Programa", "Sesiones", "Participantes", "Ranking", "Control"]
-PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]
+REQUIRED_SHEETS = ["Seguimiento", "Seguimiento individual", "Ranking", "Participantes", "Control", "Sesiones", "Programa"]
+PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"]
 SESSION_HEADERS = [
     "session_number", "session_name", "participant_id", "participant", "email",
     "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
@@ -36,11 +36,11 @@ RANKING_HEADERS = [
 ]
 CONTROL_HEADERS = [
     "session_number", "session_name", "folder_id", "transcript_status",
-    "chat_status", "processing_status", "last_processed_at",
+    "chat_status", "processing_status", "last_processed_at", "tracking_eligible",
 ]
 PROGRAM_HEADERS = [
     "nombre_programa", "folder_id", "folder_url", "session_count",
-    "participant_mode", "created_at",
+    "participant_mode", "created_at", "follow_up_ruleset_version",
 ]
 
 
@@ -103,9 +103,9 @@ def build_plan(*, program_name: str, folder_id: str, folder_url: str,
     if not program_name.strip():
         raise ValueError("El nombre del programa no puede estar vacío")
     session_count = validate_session_count(session_count)
-    if participant_mode not in {"auto", "import"}:
-        raise ValueError("El modo de participantes debe ser auto o import")
-    participants = list(imported_participants) if participant_mode == "import" else []
+    if participant_mode not in {"auto", "import", "official"}:
+        raise ValueError(f"Modo de participantes inválido: {participant_mode}")
+    participants = list(imported_participants) if participant_mode in {"import", "official"} else []
     folders = []
     for number in range(1, session_count + 1):
         name = session_folder_name(number)
@@ -183,6 +183,7 @@ def load_participants_from_rows(rows: list[list[Any]], source: str) -> list[dict
         participants.append({
             "participant_id": "", "nombre": name, "correo": email, "aliases": "",
             "role": "participant", "source": source, "status": "new",
+            "enrollment_status": "active", "start_session": "1", "end_session": "",
         })
     return participants
 
@@ -283,7 +284,7 @@ def _print_summary(plan: InitPlan) -> None:
     print(f"Modo participantes: {plan.participant_mode}")
     if plan.current_folder_name and plan.current_folder_name != plan.program_name:
         print(f"Renombrar carpeta: {plan.current_folder_name} → {plan.program_name}")
-    if plan.participant_mode == "import":
+    if plan.participant_mode in {"import", "official"}:
         print(f"Participantes importados: {imported}")
     print("\nSe crearán:")
     print(f"- {pending} carpetas de sesión")
@@ -293,19 +294,21 @@ def _print_summary(plan: InitPlan) -> None:
 def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict[str, list[list[Any]]]:
     created_at = dt.datetime.now(dt.timezone.utc).isoformat()
     from src.sync.tracking_repository import TrackingSession, TrackingView, tracking_values
+    from src.sync.follow_up_repository import FOLLOW_UP_HEADERS
     tracking = tracking_values(TrackingView((), tuple(
         TrackingSession(int(record["session_number"]), record["session_name"], "PENDING", None, None, None, {})
         for record in session_records
     )))[0]
     return {
         "Seguimiento": tracking,
+        "Seguimiento individual": [["SEGUIMIENTO INDIVIDUAL"], ["Normal", 0, "Observar", 0, "Crítico", 0, "Sin historial", 0], ["● participación registrada · ○ sin participación registrada · no es asistencia ni evaluación"], FOLLOW_UP_HEADERS],
         "Programa": [PROGRAM_HEADERS, [plan.program_name, plan.folder_id, plan.folder_url,
-                                         str(plan.session_count), plan.participant_mode, created_at]],
+                                         str(plan.session_count), plan.participant_mode, created_at, 1]],
         "Sesiones": [SESSION_HEADERS],
         "Participantes": [PARTICIPANT_HEADERS] + [[p.get(h, "participant" if h == "role" else "") for h in PARTICIPANT_HEADERS] for p in plan.participants],
         "Ranking": [RANKING_HEADERS],
         "Control": [CONTROL_HEADERS] + [[int(record["session_number"]), record["session_name"], record["folder_id"],
-                                          "pending", "pending", "pending", ""]
+                                          "pending", "pending", "pending", "", "Sí"]
                                          for record in session_records],
     }
 
@@ -396,13 +399,13 @@ def main(argv: list[str] | None = None) -> int:
         folder_id = extract_folder_id(folder_url)
         program_name = input("Nombre del programa: ").strip()
         session_count = validate_session_count(input("Número de sesiones: "))
-        mode = input("Modo de participantes (A=auto, B=import): ").strip().casefold()
-        participant_mode = {"a": "auto", "auto": "auto", "b": "import", "import": "import"}.get(mode)
+        mode = input("Modo de participantes (A=auto, B=import, C=official): ").strip().casefold()
+        participant_mode = {"a": "auto", "auto": "auto", "b": "import", "import": "import", "c": "official", "official": "official"}.get(mode)
         if participant_mode is None:
-            raise ValueError("El modo debe ser A/auto o B/import")
+            raise ValueError("El modo debe ser A/auto, B/import o C/official")
         services = None
         participants = []
-        if participant_mode == "import":
+        if participant_mode in {"import", "official"}:
             source = input("Origen de la lista (CSV, XLSX o Google Sheet): ").strip()
             drive, sheets = get_google_services()
             services = (drive, sheets)

@@ -35,6 +35,7 @@ class ProgramDependencies:
     session_results_repository: Any
     ranking_repository: Any
     tracking_repository: Any | None = None
+    follow_up_repository: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,8 @@ class ProgramRunResult:
     ranking_changed: bool
     ranking_entries: int
     tracking_changed: bool = False
+    follow_up_changed: bool = False
+    follow_up_critical_transitions: int = 0
     warnings: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     session_results: tuple[SessionProcessResult, ...] = ()
@@ -156,6 +159,21 @@ class ProgramRunner:
             except (OSError, RuntimeError, ValueError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
 
+        follow_up_changed = False
+        follow_up_critical_transitions = 0
+        if dependencies.follow_up_repository is not None:
+            try:
+                follow_up_result = dependencies.follow_up_repository.refresh(
+                    program.sessions,
+                    {session.session_number: sessions_state[session.folder_id]["status"]
+                     for session in program.sessions if session.folder_id in sessions_state},
+                    official=program.participant_mode == "official",
+                )
+                follow_up_changed = str(getattr(follow_up_result, "status", "NOOP")) != "NOOP"
+                follow_up_critical_transitions = int(getattr(follow_up_result, "critical_transitions", 0))
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+
         counts = {status: sum(item.status is status for item in session_results)
                   for status in SessionProcessStatus}
         return ProgramRunResult(
@@ -169,6 +187,8 @@ class ProgramRunner:
             session_results_changed=sum(item.changed for item in session_results),
             ranking_changed=ranking_changed, ranking_entries=ranking_entries,
             tracking_changed=tracking_changed,
+            follow_up_changed=follow_up_changed,
+            follow_up_critical_transitions=follow_up_critical_transitions,
             warnings=tuple(warnings), errors=tuple(errors),
             session_results=tuple(session_results),
         )

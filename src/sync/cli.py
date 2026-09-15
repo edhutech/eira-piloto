@@ -15,6 +15,8 @@ from .ranking_repository import GoogleSheetsRankingGateway, RankingRepository
 from .registry import DEFAULT_PROGRAMS_PATH, load_programs
 from .session_processor import SessionProcessor
 from .session_results_repository import GoogleSheetsSessionResultsGateway, SessionResultsRepository
+from .follow_up_repository import (ControlRepository, FollowUpRepository,
+                                    GoogleSheetsFollowUpGateway)
 from .notifications import DesktopNotification, NotificationLevel, NotifySendNotifier, notify_program_result
 from .sheet_styling import GoogleSheetStyler
 from .state import DEFAULT_STATE_PATH
@@ -62,8 +64,13 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             tracking_repository = TrackingRepository(
                 tracking_gateway,
                 participant_repository, session_results_repository)
+            control_repository = ControlRepository(GoogleSheetsValuesGateway(
+                sheets, program.sheet_id, "Control", ids.get("Control")))
+            follow_up_repository = FollowUpRepository(
+                GoogleSheetsFollowUpGateway(sheets, program.sheet_id),
+                participant_repository, session_results_repository, control_repository)
             resolver_factory = None
-            if program.participant_mode == "import":
+            if program.participant_mode in {"import", "official"}:
                 from .participants import ParticipantResolver
                 resolver_factory = ParticipantResolver.imported
             processor = SessionProcessor(
@@ -75,7 +82,7 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             )
             dependencies[program_id] = ProgramDependencies(
                 processor, participant_repository, session_results_repository, ranking_repository,
-                tracking_repository)
+                tracking_repository, follow_up_repository)
         return dependencies[program_id]
 
     return ProgramRunner(

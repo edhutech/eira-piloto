@@ -21,11 +21,12 @@ PALETTE = {
 }
 
 HEADERS = {
-    "Programa": ["nombre_programa", "folder_id", "folder_url", "session_count", "participant_mode", "created_at"],
+    "Programa": ["nombre_programa", "folder_id", "folder_url", "session_count", "participant_mode", "created_at", "follow_up_ruleset_version"],
     "Sesiones": ["session_number", "session_name", "participant_id", "participant", "email", "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total", "score", "scoring_complete", "countability_ruleset_version"],
-    "Participantes": ["participant_id", "nombre", "correo", "aliases", "role", "source", "status"],
+    "Participantes": ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"],
     "Ranking": ["rank", "participant_id", "participant", "email", "sessions_with_activity", "voice_total", "voice_valid_total", "chat_total", "chat_valid_total", "score_total", "ranking_complete"],
-    "Control": ["session_number", "session_name", "folder_id", "transcript_status", "chat_status", "processing_status", "last_processed_at"],
+    "Control": ["session_number", "session_name", "folder_id", "transcript_status", "chat_status", "processing_status", "last_processed_at", "tracking_eligible"],
+    "Seguimiento individual": ["participant_id", "Participante", "Email", "Matrícula", "Sesiones elegibles", "Participó", "Frecuencia", "Últimas 4", "Última participación", "Score acumulado", "Seguimiento", "Desde", "Motivo", "Nota / Acción", "follow_up_ruleset_version"],
 }
 
 
@@ -70,6 +71,8 @@ class GoogleSheetStyler:
     def _sheet_requests(self, name: str, sheet_id: int, props: Mapping[str, Any], metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
         if name == "Seguimiento":
             return self._tracking_requests(sheet_id, props)
+        if name == "Seguimiento individual":
+            return self._follow_up_requests(sheet_id, props, metadata)
         headers = HEADERS.get(name, ["campo", "valor"] if name == "Programa" else [])
         columns = len(headers)
         rows = max(int(props.get("gridProperties", {}).get("rowCount", 1000)), 2)
@@ -83,6 +86,11 @@ class GoogleSheetStyler:
         requests.extend(self._width_requests(name, sheet_id, columns))
         requests.extend(self._number_requests(name, sheet_id, rows, headers))
         requests.extend(self._conditional_requests(name, sheet_id, rows, headers, metadata))
+        if name == "Participantes":
+            requests.extend(self._participant_validations(sheet_id, rows, headers))
+        if name == "Control" and "tracking_eligible" in headers:
+            col = headers.index("tracking_eligible")
+            requests.append({"setDataValidation": {"range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": rows, "startColumnIndex": col, "endColumnIndex": col + 1}, "rule": {"condition": {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": "Sí"}, {"userEnteredValue": "No"}]}, "strict": True, "showCustomUi": True}}})
         if name != "Programa" and columns:
             if metadata.get("basicFilter"):
                 requests.append({"clearBasicFilter": {"sheetId": sheet_id}})
@@ -102,7 +110,7 @@ class GoogleSheetStyler:
         ]
 
     def _width_requests(self, name: str, sheet_id: int, columns: int) -> list[dict[str, Any]]:
-        widths = {"Programa": [170, 180, 300, 110, 140, 200], "Sesiones": [90, 180, 150, 170, 220, 90, 90, 90, 90, 110, 90, 125, 150], "Participantes": [150, 190, 230, 220, 120, 110, 120], "Ranking": [70, 150, 190, 220, 120, 100, 110, 100, 120, 110, 130], "Control": [90, 190, 170, 140, 140, 150, 190]}.get(name, [])
+        widths = {"Programa": [170, 180, 300, 110, 140, 200, 150], "Sesiones": [90, 180, 150, 170, 220, 90, 90, 90, 90, 110, 90, 125, 150], "Participantes": [150, 190, 230, 220, 120, 110, 120, 130, 100, 100], "Ranking": [70, 150, 190, 220, 120, 100, 110, 100, 120, 110, 130], "Control": [90, 190, 170, 140, 140, 150, 190, 130], "Seguimiento individual": [150, 190, 220, 110, 110, 90, 100, 110, 130, 110, 110, 100, 300, 300, 100]}.get(name, [])
         return [{"updateDimensionProperties": {"range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1}, "properties": {"pixelSize": width}, "fields": "pixelSize"}} for i, width in enumerate(widths[:columns])]
 
     def _number_requests(self, name: str, sheet_id: int, rows: int, headers: list[str]) -> list[dict[str, Any]]:
@@ -140,7 +148,40 @@ class GoogleSheetStyler:
             c = headers.index("processing_status")
             for status, color in (("PROCESSED", PALETTE["success"]), ("PENDING", PALETTE["neutral"]), ("PROCESSING", PALETTE["processing"]), ("INCOMPLETE", PALETTE["warning"]), ("NEEDS_REVIEW", PALETTE["warning"]), ("FAILED", PALETTE["error"])):
                 rules.append(self._formula_rule(sheet_id, 1, rows, c, c + 1, f'=${_column(c + 1)}2="{status}"', color))
+        if name == "Seguimiento individual":
+            c = col("Seguimiento")
+            if c is not None:
+                data_start = 4
+                formula_row = data_start + 1
+                for level, color in (("Normal", PALETTE["success"]), ("Observar", PALETTE["warning"]), ("Crítico", PALETTE["error"]), ("—", PALETTE["neutral"])):
+                    rules.append(self._formula_rule(sheet_id, data_start, rows, c, c + 1, f'=${_column(c + 1)}{formula_row}="{level}"', color))
+                enrollment = col("Matrícula")
+                if enrollment is not None:
+                    rules.append(self._formula_rule(sheet_id, data_start, rows, 1, c + 1, f'=${_column(enrollment + 1)}{formula_row}="inactive"', PALETTE["neutral"]))
         return [{"addConditionalFormatRule": {"rule": rule, "index": index}} for index, rule in enumerate(rules)]
+
+    def _participant_validations(self, sheet_id: int, rows: int, headers: list[str]) -> list[dict[str, Any]]:
+        requests = []
+        for header, condition in (("enrollment_status", {"type": "ONE_OF_LIST", "values": [{"userEnteredValue": "active"}, {"userEnteredValue": "inactive"}]}), ("start_session", {"type": "NUMBER_GREATER_THAN_EQ", "values": [{"userEnteredValue": "1"}]}), ("end_session", {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": '=OR(J2="",J2>=I2)'}]})):
+            if header in headers:
+                col = headers.index(header)
+                requests.append({"setDataValidation": {"range": {"sheetId": sheet_id, "startRowIndex": 1, "endRowIndex": rows, "startColumnIndex": col, "endColumnIndex": col + 1}, "rule": {"condition": condition, "strict": True, "showCustomUi": True}}})
+        return requests
+
+    def _follow_up_requests(self, sheet_id: int, props: Mapping[str, Any], metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+        columns = len(HEADERS["Seguimiento individual"])
+        rows = max(int(props.get("gridProperties", {}).get("rowCount", 1000)), 5)
+        requests = [
+            {"updateSheetProperties": {"properties": {"sheetId": sheet_id, "gridProperties": {"hideGridlines": True, "frozenRowCount": 4, "frozenColumnCount": 2}}, "fields": "gridProperties(hideGridlines,frozenRowCount,frozenColumnCount)"}},
+            {"repeatCell": {"range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": columns}, "cell": {"userEnteredFormat": {"backgroundColor": PALETTE["dark"], "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True, "fontSize": 12}}}, "fields": "userEnteredFormat"}},
+            {"repeatCell": {"range": {"sheetId": sheet_id, "startRowIndex": 3, "endRowIndex": 4, "startColumnIndex": 0, "endColumnIndex": columns}, "cell": {"userEnteredFormat": {"backgroundColor": PALETTE["light"], "textFormat": {"bold": True}, "horizontalAlignment": "CENTER"}}, "fields": "userEnteredFormat"}},
+            {"updateDimensionProperties": {"range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"hiddenByUser": True}, "fields": "hiddenByUser"}},
+            {"updateDimensionProperties": {"range": {"sheetId": sheet_id, "dimension": "COLUMNS", "startIndex": 13, "endIndex": 14}, "properties": {"pixelSize": 300}, "fields": "pixelSize"}},
+            {"repeatCell": {"range": {"sheetId": sheet_id, "startRowIndex": 4, "endRowIndex": rows, "startColumnIndex": 6, "endColumnIndex": 7}, "cell": {"userEnteredFormat": {"numberFormat": {"type": "PERCENT", "pattern": "0.0%"}}}, "fields": "userEnteredFormat.numberFormat"}},
+            {"repeatCell": {"range": {"sheetId": sheet_id, "startRowIndex": 4, "endRowIndex": rows, "startColumnIndex": 9, "endColumnIndex": 10}, "cell": {"userEnteredFormat": {"numberFormat": {"type": "NUMBER", "pattern": "0.0"}}}, "fields": "userEnteredFormat.numberFormat"}},
+            {"setBasicFilter": {"filter": {"range": {"sheetId": sheet_id, "startRowIndex": 3, "endRowIndex": rows, "startColumnIndex": 0, "endColumnIndex": columns}}}},
+        ]
+        return requests + self._conditional_requests("Seguimiento individual", sheet_id, rows, HEADERS["Seguimiento individual"], metadata)
 
     @staticmethod
     def _formula_rule(sheet_id: int, start_row: int, end_row: int, start_col: int, end_col: int, formula: str, color: dict[str, float]) -> dict[str, Any]:

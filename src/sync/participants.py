@@ -27,6 +27,10 @@ class Participant:
     role: Role = "participant"
     source: str = "auto"
     status: str = "unverified"
+    enrollment_status: str = "active"
+    start_session: int = 1
+    end_session: int | None = None
+    enrollment_config_valid: bool = True
 
     def __post_init__(self) -> None:
         self.aliases = list(self.aliases or [])
@@ -46,7 +50,7 @@ class ResolutionResult:
 
 @dataclass
 class ParticipantResolver:
-    mode: Literal["auto", "import"]
+    mode: Literal["auto", "import", "official"]
     participants: list[Participant]
 
     @classmethod
@@ -126,6 +130,9 @@ class ParticipantResolver:
                 "role": p.role,
                 "source": p.source,
                 "status": p.status,
+                "enrollment_status": p.enrollment_status,
+                "start_session": p.start_session,
+                "end_session": p.end_session,
             }
             for p in self.participants
         ]
@@ -190,6 +197,22 @@ def _participant_from_record(record: dict[str, Any], default_source: str) -> Par
     if not participant_id:
         identity = email_key(email) or strict_name_key(name)
         participant_id = f"{default_source}_{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+    enrollment_status = str(record.get("enrollment_status", "active")) or "active"
+    start_raw = record.get("start_session", 1)
+    end_raw = str(record.get("end_session", "")).strip()
+    valid = True
+    try:
+        start_session = int(float(start_raw or 1))
+    except (TypeError, ValueError):
+        start_session, valid = 1, False
+    try:
+        end_session = int(float(end_raw)) if end_raw else None
+    except (TypeError, ValueError):
+        end_session, valid = None, False
+    valid = valid and enrollment_status in {"active", "inactive"} and start_session >= 1
+    valid = valid and not (enrollment_status == "active" and end_session is not None)
+    valid = valid and not (enrollment_status == "inactive" and end_session is None)
+    valid = valid and not (end_session is not None and end_session < start_session)
     return Participant(
         participant_id=participant_id,
         nombre=name,
@@ -198,4 +221,8 @@ def _participant_from_record(record: dict[str, Any], default_source: str) -> Par
         role=record.get("role", "participant"),
         source=str(record.get("source", default_source)),
         status=str(record.get("status", "unverified" if default_source == "auto" else "imported")),
+        enrollment_status=str(record.get("enrollment_status", "active")) or "active",
+        start_session=start_session,
+        end_session=end_session,
+        enrollment_config_valid=valid,
     )
