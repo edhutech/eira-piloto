@@ -52,6 +52,7 @@ class ProgramRunResult:
     session_results_changed: int
     ranking_changed: bool
     ranking_entries: int
+    tracking_changed: bool = False
     warnings: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     session_results: tuple[SessionProcessResult, ...] = ()
@@ -143,13 +144,15 @@ class ProgramRunner:
         except (OSError, RuntimeError, ValueError) as exc:
             errors.append(f"{type(exc).__name__}: {exc}")
 
+        tracking_changed = False
         if dependencies.tracking_repository is not None:
             try:
-                dependencies.tracking_repository.refresh(
+                tracking_result = dependencies.tracking_repository.refresh(
                     program.sessions,
                     {session.session_number: sessions_state[session.folder_id]["status"]
                      for session in program.sessions if session.folder_id in sessions_state},
                 )
+                tracking_changed = str(getattr(tracking_result, "status", "REPLACE")) != "NOOP"
             except (OSError, RuntimeError, ValueError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
 
@@ -165,6 +168,7 @@ class ProgramRunner:
             participants_created=sum(item.participants_created for item in session_results),
             session_results_changed=sum(item.changed for item in session_results),
             ranking_changed=ranking_changed, ranking_entries=ranking_entries,
+            tracking_changed=tracking_changed,
             warnings=tuple(warnings), errors=tuple(errors),
             session_results=tuple(session_results),
         )

@@ -178,6 +178,11 @@ class SessionResultsRepositoryTests(unittest.TestCase):
         self.assertEqual(scores[0].score, Decimal("1.5"))
         self.assertTrue(scores[0].scoring_complete)
 
+    def test_load_scores_accepts_legacy_integral_decimal_counts(self):
+        row = ["1", "Sesión 1", "p1", "Ana", "", "2.0", "1.0", "3.0", "2.0", "0.0", "1.5", "TRUE", "1"]
+        scores = SessionResultsRepository(FakeGateway([CANONICAL_SESSION_HEADERS, row])).load_scores()
+        self.assertEqual((scores[0].voice_total, scores[0].chat_valid, scores[0].ambiguous_total), (2, 2, 0))
+
     def test_legacy_empty_schema_migrates_by_appending_missing_columns(self):
         gateway = FakeGateway([LEGACY_HEADERS])
         repository = SessionResultsRepository(gateway)

@@ -207,13 +207,13 @@ class SessionResultsRepository:
         """Decode confirmed persisted rows for downstream derived views."""
         records = self.load_records()
         return [ParticipantSessionScore(
-            session_number=int(record["session_number"]),
+            session_number=_parse_integral(record["session_number"]),
             participant_id=str(record["participant_id"]).strip(),
-            voice_total=int(record["voice_total"]),
-            voice_valid=int(record["voice_valid"]),
-            chat_total=int(record["chat_total"]),
-            chat_valid=int(record["chat_valid"]),
-            ambiguous_total=int(record["ambiguous_total"]),
+            voice_total=_parse_integral(record["voice_total"]),
+            voice_valid=_parse_integral(record["voice_valid"]),
+            chat_total=_parse_integral(record["chat_total"]),
+            chat_valid=_parse_integral(record["chat_valid"]),
+            ambiguous_total=_parse_integral(record["ambiguous_total"]),
             score=Decimal(str(record["score"])),
             scoring_complete=_parse_bool(record["scoring_complete"]),
         ) for record in records]
@@ -392,6 +392,16 @@ def _canonical_score(value: Decimal | str | int | float) -> str:
     if score < 0 or (score * 2) != (score * 2).to_integral_value():
         raise ValueError("El score debe ser no negativo y estar en incrementos de 0.5")
     return format(score, "f")
+
+
+def _parse_integral(value: Any) -> int:
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"Conteo entero inválido: {value}") from exc
+    if not number.is_finite() or number != number.to_integral_value():
+        raise ValueError(f"Conteo no entero: {value}")
+    return int(number)
 
 
 def _parse_bool(value: Any) -> bool:

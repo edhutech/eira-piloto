@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -14,10 +15,13 @@ from .ranking_repository import GoogleSheetsRankingGateway, RankingRepository
 from .registry import DEFAULT_PROGRAMS_PATH, load_programs
 from .session_processor import SessionProcessor
 from .session_results_repository import GoogleSheetsSessionResultsGateway, SessionResultsRepository
+from .notifications import DesktopNotification, NotificationLevel, NotifySendNotifier, notify_program_result
 from .sheet_styling import GoogleSheetStyler
 from .state import DEFAULT_STATE_PATH
 from .tracking_gateway import GoogleSheetsTrackingGateway
 from .tracking_repository import TrackingRepository
+
+logger = logging.getLogger(__name__)
 
 
 def _sheet_ids(sheets: Any, spreadsheet_id: str) -> dict[str, int]:
@@ -98,18 +102,36 @@ def _print_results(results: list[Any]) -> None:
         print(f"Failed: {result.sessions_failed}")
 
 
-def main(argv: list[str] | None = None, *, runner_factory=build_runner) -> int:
+def main(argv: list[str] | None = None, *, runner_factory=build_runner,
+         notifier_factory=NotifySendNotifier) -> int:
     parser = argparse.ArgumentParser(description="Ejecuta una sincronización one-shot")
     parser.add_argument("--program", help="ID o nombre exacto del programa")
     parser.add_argument("--programs-path", type=Path, default=DEFAULT_PROGRAMS_PATH)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
+    parser.add_argument("--no-notify", action="store_true", help="deshabilita notificaciones de escritorio")
     args = parser.parse_args(argv)
     try:
         results = runner_factory(args.programs_path, args.state_path).run(args.program)
         _print_results(results)
+        if not args.no_notify:
+            try:
+                notifier = notifier_factory()
+                for result in results:
+                    notify_program_result(notifier, result)
+            except Exception as exc:
+                logger.warning("notification failed: %s", exc)
         return 1 if any(result.sessions_failed or result.errors for result in results) else 0
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}")
+        if not args.no_notify:
+            try:
+                notifier_factory().notify(DesktopNotification(
+                    "Error en participación",
+                    f"{args.program or 'participacion-sync'} terminó con errores",
+                    NotificationLevel.CRITICAL,
+                ))
+            except Exception as notify_exc:
+                logger.warning("notification failed: %s", notify_exc)
         return 1
 
 
