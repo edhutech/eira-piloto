@@ -1,1 +1,5 @@
 .participation_tracker/
+
+# Python cache
+__pycache__/
+*.py[cod]
