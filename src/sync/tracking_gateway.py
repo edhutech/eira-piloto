@@ -56,6 +56,7 @@ class GoogleSheetsTrackingGateway:
                 structural_change: bool, worksheet_id: int | None) -> TrackingWriteResult:
         existing = self.read_values()
         if structural_change:
+            self._clear_stale_tail(existing, values)
             self._write_values(_json_values(values))
             self._format(values, worksheet_id)
             return TrackingWriteResult("REPLACE", max(0, len(values) - 5))
@@ -80,6 +81,21 @@ class GoogleSheetsTrackingGateway:
                 ).execute(), self.max_attempts)
             return TrackingWriteResult("REPLACE", len(values) - 5)
         return TrackingWriteResult("NOOP", len(values) - 5)
+
+    def _clear_stale_tail(self, existing: Sequence[Sequence[Any]],
+                          desired: Sequence[Sequence[Any]]) -> None:
+        if len(existing) <= len(desired):
+            return
+        width = max((len(row) for row in existing), default=0)
+        width = max(width, max((len(row) for row in desired), default=0))
+        if width == 0:
+            return
+        range_name = (f"'{self.sheet_name}'!A{len(desired) + 1}:"
+                      f"{_column(width)}{len(existing)}")
+        execute_with_transient_retry(
+            lambda: self.service.spreadsheets().values().clear(
+                spreadsheetId=self.spreadsheet_id, range=range_name, body={}
+            ).execute(), self.max_attempts)
 
     def _write_values(self, values: list[list[Any]]) -> None:
         execute_with_transient_retry(

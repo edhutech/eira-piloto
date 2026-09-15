@@ -61,6 +61,11 @@ class ParticipantResolver:
     def imported(cls, records: Iterable[dict[str, Any]]) -> "ParticipantResolver":
         return cls("import", [_participant_from_record(record, "import") for record in records])
 
+    @classmethod
+    def official(cls, records: Iterable[dict[str, Any]]) -> "ParticipantResolver":
+        """Resolve only against the confirmed roster using strict matches."""
+        return cls("official", [_participant_from_record(record, "official") for record in records])
+
     def resolve_event(self, event: Any) -> ResolutionResult:
         if getattr(event, "identity_type", "HUMAN") == "SYSTEM":
             return ResolutionResult(ResolutionStatus.IGNORED)

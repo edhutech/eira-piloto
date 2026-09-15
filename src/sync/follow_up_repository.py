@@ -210,6 +210,7 @@ class GoogleSheetsFollowUpGateway:
         existing = self.read_values()
         payload = _json_values(values)
         if structural_change:
+            self._clear_stale_tail(existing, values)
             execute_with_transient_retry(lambda: self.service.spreadsheets().values().update(
                 spreadsheetId=self.spreadsheet_id, range=f"'{self.sheet_name}'!A1",
                 valueInputOption="USER_ENTERED", body={"values": payload}).execute(), self.max_attempts)
@@ -227,6 +228,19 @@ class GoogleSheetsFollowUpGateway:
         execute_with_transient_retry(lambda: self.service.spreadsheets().values().batchUpdate(
             spreadsheetId=self.spreadsheet_id, body={"valueInputOption": "USER_ENTERED", "data": updates}).execute(), self.max_attempts)
         return FollowUpWriteResult("REPLACE", len(values) - 4)
+
+    def _clear_stale_tail(self, existing: Sequence[Sequence[Any]],
+                          desired: Sequence[Sequence[Any]]) -> None:
+        if len(existing) <= len(desired):
+            return
+        width = max((len(row) for row in existing), default=0)
+        width = max(width, max((len(row) for row in desired), default=0))
+        if width == 0:
+            return
+        range_name = (f"'{self.sheet_name}'!A{len(desired) + 1}:"
+                      f"{_column(width)}{len(existing)}")
+        execute_with_transient_retry(lambda: self.service.spreadsheets().values().clear(
+            spreadsheetId=self.spreadsheet_id, range=range_name, body={}).execute(), self.max_attempts)
 
 
 def _json_values(values: Sequence[Sequence[Any]]) -> list[list[Any]]:

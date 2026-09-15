@@ -50,3 +50,24 @@ class RosterTests(unittest.TestCase):
         RosterImporter(repo).apply(plan)
         self.assertEqual(repo.people[0].role, "facilitator")
         self.assertEqual(repo.people[0].participant_id, "f1")
+
+    def test_duplicate_roster_email_blocks_apply(self):
+        records = [RosterRecord("Ana", "ana@example.com"), RosterRecord("Bea", "ana@example.com")]
+        plan = RosterImporter(FakeParticipantRepository([])).dry_run(records)
+        self.assertEqual([item.action for item in plan.items], [RosterAction.NEEDS_REVIEW, RosterAction.NEEDS_REVIEW])
+
+    def test_existing_collision_with_new_official_id_blocks_apply(self):
+        record = RosterRecord("Nueva", "new@example.com")
+        collision = Participant(_stable_official_id(record), "Otra", "other@example.com")
+        plan = RosterImporter(FakeParticipantRepository([collision])).dry_run([record])
+        self.assertEqual(plan.items[0].action, RosterAction.NEEDS_REVIEW)
+
+    def test_roster_role_is_ignored_for_existing_and_new_people(self):
+        repo = FakeParticipantRepository([Participant("p1", "Ana", "ana@example.com", role="facilitator")])
+        plan = RosterImporter(repo).dry_run([RosterRecord("Ana", "ana@example.com", role="participant")])
+        RosterImporter(repo).apply(plan)
+        self.assertEqual(repo.people[0].role, "facilitator")
+        created_repo = FakeParticipantRepository([])
+        created_plan = RosterImporter(created_repo).dry_run([RosterRecord("Bea", "bea@example.com", role="other")])
+        RosterImporter(created_repo).apply(created_plan)
+        self.assertEqual(created_repo.people[0].role, "participant")

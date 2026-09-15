@@ -63,3 +63,16 @@ class FollowUpRepositoryTests(unittest.TestCase):
         result = repo.refresh((), {}, official=False)
         self.assertEqual(result.status, "NOOP")
         self.assertEqual(gateway.values, [])
+
+    def test_structural_refresh_removes_stale_tail_rows(self):
+        gateway, people = Gateway(), People()
+        repo = FollowUpRepository(gateway, people, Scores(), Control())
+        sessions = tuple(SessionRecord(i, str(i), str(i)) for i in range(1, 5))
+        statuses = {i: "PROCESSED" for i in range(1, 5)}
+        people.people.append(Participant("p2", "Bea"))
+        repo.refresh(sessions, statuses, official=True)
+        gateway.values.extend([["ghost"] + [""] * (len(FOLLOW_UP_HEADERS) - 1) for _ in range(2)])
+        people.people.pop()
+        result = repo.refresh(sessions, statuses, official=True)
+        self.assertEqual(result.status, "REPLACE")
+        self.assertEqual(len(gateway.values), 5)

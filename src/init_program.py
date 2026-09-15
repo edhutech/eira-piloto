@@ -7,16 +7,17 @@ transcripts/chats, no usa un LLM y no calcula participación.
 from __future__ import annotations
 
 import argparse
-import csv
 import datetime as dt
 import json
 import re
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
-from xml.etree import ElementTree as ET
+
+from .sync.roster import (read_csv_roster, read_google_roster, read_xlsx_roster,
+                          roster_header_positions, roster_records_from_rows,
+                          roster_records_to_participants)
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = ROOT / ".participation_tracker" / "programs.json"
@@ -87,11 +88,7 @@ def _header_key(value: Any) -> str:
 
 
 def validate_participant_columns(headers: Iterable[Any]) -> dict[str, int]:
-    positions = {_header_key(value): index for index, value in enumerate(headers)}
-    missing = [key for key in ("nombre", "correo") if key not in positions]
-    if missing:
-        raise ValueError("Faltan columnas obligatorias: " + ", ".join(missing))
-    return {key: positions[key] for key in ("nombre", "correo")}
+    return roster_header_positions(list(headers))
 
 
 def build_plan(*, program_name: str, folder_id: str, folder_url: str,
@@ -125,67 +122,10 @@ def build_plan(*, program_name: str, folder_id: str, folder_url: str,
     )
 
 
-def _read_csv(path: Path) -> list[list[str]]:
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        return list(csv.reader(handle))
-
-
-def _xlsx_cell_value(cell: ET.Element, shared: list[str]) -> str:
-    value = cell.find("{*}v")
-    raw = "" if value is None else value.text or ""
-    if cell.attrib.get("t") == "s" and raw.isdigit() and int(raw) < len(shared):
-        return shared[int(raw)]
-    return raw
-
-
-def _read_xlsx(path: Path) -> list[list[str]]:
-    with zipfile.ZipFile(path) as archive:
-        shared: list[str] = []
-        if "xl/sharedStrings.xml" in archive.namelist():
-            root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
-            shared = ["".join(node.itertext()) for node in root.findall(".//{*}si")]
-        workbook = ET.fromstring(archive.read("xl/workbook.xml"))
-        sheet = workbook.find(".//{*}sheet")
-        if sheet is None:
-            return []
-        rel_id = sheet.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
-        rels = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
-        target = next((item.attrib["Target"] for item in rels.findall("{*}Relationship")
-                       if item.attrib.get("Id") == rel_id), "worksheets/sheet1.xml")
-        target = target.removeprefix("/")
-        if not target.startswith("xl/"):
-            target = "xl/" + target
-        root = ET.fromstring(archive.read(target))
-        rows = []
-        for row in root.findall(".//{*}row"):
-            cells = {}
-            for cell in row.findall("{*}c"):
-                ref = cell.attrib.get("r", "A1")
-                column = re.match(r"[A-Z]+", ref).group(0)
-                index = 0
-                for char in column:
-                    index = index * 26 + ord(char) - 64
-                cells[index - 1] = _xlsx_cell_value(cell, shared)
-            rows.append([cells.get(i, "") for i in range(max(cells, default=-1) + 1)])
-        return rows
-
-
 def load_participants_from_rows(rows: list[list[Any]], source: str) -> list[dict[str, str]]:
     if not rows:
         raise ValueError("La lista de participantes está vacía")
-    mapping = validate_participant_columns(rows[0])
-    participants = []
-    for row_number, row in enumerate(rows[1:], start=2):
-        values = list(row) + [""] * (max(mapping.values()) + 1 - len(row))
-        name, email = (str(values[mapping[key]]) for key in ("nombre", "correo"))
-        if not name.strip() or not email.strip():
-            raise ValueError(f"La fila {row_number} requiere nombre y correo")
-        participants.append({
-            "participant_id": "", "nombre": name, "correo": email, "aliases": "",
-            "role": "participant", "source": source, "status": "new",
-            "enrollment_status": "active", "start_session": "1", "end_session": "",
-        })
-    return participants
+    return roster_records_to_participants(roster_records_from_rows(rows), source)
 
 
 def extract_spreadsheet_id(source: str) -> str:
@@ -201,15 +141,17 @@ def extract_spreadsheet_id(source: str) -> str:
 def load_participants(source: str, sheets_service: Any = None) -> list[dict[str, str]]:
     path = Path(source).expanduser()
     if path.is_file() and path.suffix.casefold() == ".csv":
-        return load_participants_from_rows(_read_csv(path), str(path))
+        return roster_records_to_participants(read_csv_roster(path), str(path))
     if path.is_file() and path.suffix.casefold() == ".xlsx":
-        return load_participants_from_rows(_read_xlsx(path), str(path))
+        return roster_records_to_participants(read_xlsx_roster(path), str(path))
     if sheets_service is not None:
         spreadsheet_id = extract_spreadsheet_id(source)
-        result = sheets_service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id, range="A:Z"
-        ).execute()
-        return load_participants_from_rows(result.get("values", []), spreadsheet_id)
+        class GoogleSource:
+            def read_values(self) -> list[list[Any]]:
+                return sheets_service.spreadsheets().values().get(
+                    spreadsheetId=spreadsheet_id, range="A:Z"
+                ).execute().get("values", [])
+        return roster_records_to_participants(read_google_roster(GoogleSource()), spreadsheet_id)
     raise ValueError("El origen debe ser un archivo CSV/XLSX o el ID de un Google Sheet")
 
 

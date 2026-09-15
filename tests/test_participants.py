@@ -118,6 +118,31 @@ class ParticipantResolutionTests(unittest.TestCase):
         result = resolver.resolve_event(event("JOSE"))
         self.assertEqual(result.status, ResolutionStatus.NEEDS_REVIEW)
 
+    def test_official_exact_email_resolves_without_loose_matching(self):
+        resolver = ParticipantResolver.official([{"participant_id": "p1", "nombre": "José", "correo": "j@example.com"}])
+        result = resolver.resolve_event(event("Jose", email="j@example.com"))
+        self.assertEqual(result.status, ResolutionStatus.RESOLVED)
+        self.assertEqual(result.participant_id, "p1")
+
+    def test_official_strict_name_and_alias_resolve(self):
+        resolver = ParticipantResolver.official([
+            {"participant_id": "p1", "nombre": "José", "correo": "j@example.com", "aliases": ["Pepe"]},
+        ])
+        self.assertEqual(resolver.resolve_event(event("José")).participant_id, "p1")
+        self.assertEqual(resolver.resolve_event(event("Pepe")).participant_id, "p1")
+
+    def test_official_unknown_and_loose_name_need_review(self):
+        resolver = ParticipantResolver.official([{"participant_id": "p1", "nombre": "José", "correo": "j@example.com"}])
+        self.assertEqual(resolver.resolve_event(event("Unknown")).status, ResolutionStatus.NEEDS_REVIEW)
+        self.assertEqual(resolver.resolve_event(event("Jose")).status, ResolutionStatus.NEEDS_REVIEW)
+
+    def test_official_ambiguous_match_needs_review(self):
+        resolver = ParticipantResolver.official([
+            {"participant_id": "p1", "nombre": "Alex One", "correo": "one@example.com", "aliases": ["Alex"]},
+            {"participant_id": "p2", "nombre": "Alex Two", "correo": "two@example.com", "aliases": ["Alex"]},
+        ])
+        self.assertEqual(resolver.resolve_event(event("Alex")).status, ResolutionStatus.NEEDS_REVIEW)
+
     def test_existing_participants_are_not_merged_by_loose_match(self):
         resolver = ParticipantResolver.auto([
             {"participant_id": "p1", "nombre": "José", "correo": ""},

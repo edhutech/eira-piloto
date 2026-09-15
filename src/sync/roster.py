@@ -58,7 +58,9 @@ class GoogleRosterSource(Protocol):
 class RosterImporter:
     """Non-destructive official roster reconciliation.
 
-    Planning is always read-only. Applying requires an explicit call to apply(plan).
+    The roster is authoritative for identity and enrollment fields only;
+    ``role`` remains a manually protected participant field. Planning is
+    always read-only. Applying requires an explicit call to apply(plan).
     """
 
     def __init__(self, participant_repository: ParticipantRepository):
@@ -67,8 +69,16 @@ class RosterImporter:
     def dry_run(self, records: Iterable[RosterRecord]) -> RosterPlan:
         existing = self.repository.load()
         people = list(existing)
+        records = list(records)
+        duplicate_emails = _duplicate_roster_emails(records)
+        planned_ids: dict[str, RosterRecord] = {}
         items: list[RosterPlanItem] = []
         for record in records:
+            email_key = record.correo.strip().casefold()
+            if email_key in duplicate_emails:
+                items.append(RosterPlanItem(record, RosterAction.NEEDS_REVIEW, None,
+                                            reason="correo repetido dentro del roster"))
+                continue
             matches, method = _matches(record, people)
             if len(matches) > 1:
                 items.append(RosterPlanItem(record, RosterAction.NEEDS_REVIEW, None,
@@ -82,6 +92,16 @@ class RosterImporter:
                                             person.participant_id, reason=method))
                 continue
             participant_id = _stable_official_id(record)
+            existing_id = next((p for p in people if p.participant_id == participant_id), None)
+            planned_record = planned_ids.get(participant_id)
+            if existing_id is not None or planned_record is not None:
+                reason = ("participant_id oficial colisiona con una identidad existente"
+                          if existing_id is not None else
+                          "participant_id oficial colisiona dentro del roster")
+                items.append(RosterPlanItem(record, RosterAction.NEEDS_REVIEW, participant_id,
+                                            reason=reason))
+                continue
+            planned_ids[participant_id] = record
             items.append(RosterPlanItem(record, RosterAction.CREATE, participant_id,
                                         reason="sin candidato existente"))
         return RosterPlan(tuple(items))
@@ -128,6 +148,14 @@ def _matches(record: RosterRecord, people: Sequence[Participant]) -> tuple[list[
     return candidates, "alias exacto"
 
 
+def _duplicate_roster_emails(records: Sequence[RosterRecord]) -> set[str]:
+    counts: dict[str, int] = {}
+    for record in records:
+        key = record.correo.strip().casefold()
+        counts[key] = counts.get(key, 0) + 1
+    return {key for key, count in counts.items() if key and count > 1}
+
+
 def _needs_update(person: Participant, record: RosterRecord) -> bool:
     return (person.nombre != record.nombre or person.correo != record.correo or
             person.enrollment_status != record.enrollment_status or
@@ -141,8 +169,7 @@ def _stable_official_id(record: RosterRecord) -> str:
 
 def read_csv_roster(path: str | Path) -> list[RosterRecord]:
     with Path(path).open("r", encoding="utf-8-sig", newline="") as handle:
-        rows = csv.DictReader(handle)
-        return [_record_from_mapping(row) for row in rows]
+        return roster_records_from_rows(list(csv.reader(handle)))
 
 
 def read_xlsx_roster(path: str | Path) -> list[RosterRecord]:
@@ -151,20 +178,52 @@ def read_xlsx_roster(path: str | Path) -> list[RosterRecord]:
     except ImportError as exc:
         raise RuntimeError("XLSX requiere openpyxl instalado en el entorno del proyecto") from exc
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook.active
-    rows = list(sheet.iter_rows(values_only=True))
-    if not rows:
-        return []
-    headers = [str(value or "").strip() for value in rows[0]]
-    return [_record_from_mapping(dict(zip(headers, row))) for row in rows[1:] if any(row)]
+    try:
+        sheet = workbook.active
+        return roster_records_from_rows(
+            [] if sheet is None else [list(row) for row in sheet.iter_rows(values_only=True)]
+        )
+    finally:
+        workbook.close()
 
 
 def read_google_roster(source: GoogleRosterSource) -> list[RosterRecord]:
     values = source.read_values()
     if not values:
         return []
-    headers = [str(value or "").strip() for value in values[0]]
-    return [_record_from_mapping(dict(zip(headers, row))) for row in values[1:] if any(row)]
+    return roster_records_from_rows(values)
+
+
+def roster_records_from_rows(rows: Sequence[Sequence[Any]]) -> list[RosterRecord]:
+    if not rows:
+        return []
+    headers = [str(value or "").strip() for value in rows[0]]
+    roster_header_positions(headers)
+    return [_record_from_mapping(dict(zip(headers, row))) for row in rows[1:] if any(row)]
+
+
+def roster_header_positions(headers: Sequence[Any]) -> dict[str, int]:
+    positions = {str(header).strip().casefold().replace(" ", "_"): index
+                 for index, header in enumerate(headers)}
+    if "nombre" not in positions and "name" in positions:
+        positions["nombre"] = positions["name"]
+    if "correo" not in positions and "email" in positions:
+        positions["correo"] = positions["email"]
+    missing = [key for key in ("nombre", "correo") if key not in positions]
+    if missing:
+        raise ValueError("Faltan columnas obligatorias: " + ", ".join(missing))
+    return {key: positions[key] for key in ("nombre", "correo")}
+
+
+def roster_records_to_participants(records: Iterable[RosterRecord], source: str) -> list[dict[str, str]]:
+    """Adapt canonical roster records to the initialization sheet contract."""
+    return [{
+        "participant_id": "", "nombre": record.nombre, "correo": record.correo,
+        "aliases": "", "role": "participant", "source": source, "status": "new",
+        "enrollment_status": record.enrollment_status,
+        "start_session": str(record.start_session),
+        "end_session": "" if record.end_session is None else str(record.end_session),
+    } for record in records]
 
 
 def _record_from_mapping(row: Mapping[str, Any]) -> RosterRecord:

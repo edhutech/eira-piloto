@@ -70,9 +70,13 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
                 GoogleSheetsFollowUpGateway(sheets, program.sheet_id),
                 participant_repository, session_results_repository, control_repository)
             resolver_factory = None
-            if program.participant_mode in {"import", "official"}:
+            if program.participant_mode in {"auto", "import", "official"}:
                 from .participants import ParticipantResolver
-                resolver_factory = ParticipantResolver.imported
+                resolver_factory = {
+                    "auto": ParticipantResolver.auto,
+                    "import": ParticipantResolver.imported,
+                    "official": ParticipantResolver.official,
+                }[program.participant_mode]
             processor = SessionProcessor(
                 content_loader=DriveContentReader(drive, docs),
                 parsers=[GoogleDocsParser(), DocxParser(), VttParser(), SbvParser(), TxtParser()],

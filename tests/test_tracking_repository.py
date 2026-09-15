@@ -105,6 +105,16 @@ class TrackingTests(unittest.TestCase):
         self.assertEqual(len(values[0]), 6)
         self.assertEqual(manual, {(1, 4)})
 
+    def test_structural_refresh_removes_stale_tail_rows(self):
+        gateway = FakeGateway()
+        repository = TrackingRepository(gateway, FakeParticipants(self.participants[:2]), FakeSessions(self.results))
+        repository.refresh(self.sessions, {1: "PROCESSED", 2: "INCOMPLETE"})
+        gateway.values.extend([["ghost", "Ghost", "ghost@example.com"] + [""] * 6 for _ in range(3)])
+        repository.participant_repository.values[:] = self.participants[:1]
+        result = repository.refresh(self.sessions, {1: "PROCESSED", 2: "INCOMPLETE"})
+        self.assertEqual(result.status, "REPLACE")
+        self.assertEqual(len(gateway.values), 6)
+
 
 if __name__ == "__main__":
     unittest.main()
