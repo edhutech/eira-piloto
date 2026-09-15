@@ -3,9 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from participacion.cli import main
-from participacion.notifications import (DesktopNotification, NotificationLevel,
-                                     NotifySendNotifier, build_program_notification,
-                                     notify_program_result)
+from participacion.application.notifications import (Notification, NotificationLevel,
+                                     build_program_notification, notify_program_result)
+from participacion.adapters.notifications.notify_send import NotifySendNotifier
 
 
 def result(**overrides):
@@ -54,16 +54,16 @@ class NotificationTests(unittest.TestCase):
         self.assertEqual(notification.body, "2 sesiones procesadas · 3 participantes nuevos · Ranking actualizado")
         self.assertNotIn("participant_id", notification.body)
 
-    @patch("participacion.notifications.subprocess.run")
+    @patch("participacion.adapters.notifications.notify_send.subprocess.run")
     def test_notify_send_command_urgency_icon_and_timeout(self, run):
         run.return_value = SimpleNamespace(returncode=0, stderr="")
         notifier = NotifySendNotifier("/usr/bin/notify-send", timeout_seconds=3)
-        self.assertTrue(notifier.notify(DesktopNotification("T", "B", NotificationLevel.CRITICAL)))
+        self.assertTrue(notifier.notify(Notification("T", "B", NotificationLevel.CRITICAL)))
         command = run.call_args.args[0]
         self.assertEqual(command, ["/usr/bin/notify-send", "--urgency", "critical", "--expire-time", "12000", "--icon", "dialog-error", "T", "B"])
         self.assertEqual(run.call_args.kwargs["timeout"], 3)
 
-    @patch("participacion.notifications.subprocess.run")
+    @patch("participacion.adapters.notifications.notify_send.subprocess.run")
     def test_subprocess_failure_is_best_effort(self, run):
         run.side_effect = OSError("no dbus")
         notifier = NotifySendNotifier("notify-send")
@@ -71,7 +71,7 @@ class NotificationTests(unittest.TestCase):
 
     def test_unavailable_notifier_is_best_effort(self):
         notifier = NotifySendNotifier(None)
-        with patch("participacion.notifications.shutil.which", return_value=None):
+        with patch("participacion.adapters.notifications.notify_send.shutil.which", return_value=None):
             notifier = NotifySendNotifier()
         self.assertFalse(notify_program_result(notifier, result(sessions_processed=1, session_results_changed=1)))
 

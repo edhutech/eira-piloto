@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,11 @@ from ..application.session_processor import SessionProcessor
 from ..adapters.google.sheets.session_results import GoogleSheetsSessionResultsGateway, SessionResultsRepository
 from ..adapters.google.sheets.follow_up import (ControlRepository, FollowUpRepository,
                                     GoogleSheetsFollowUpGateway)
-from ..notifications import DesktopNotification, NotificationLevel, NotifySendNotifier, notify_program_result
+from ..application.notifications import Notification, NotificationLevel, notify_program_result
+from ..addons.follow_up.addon import IndividualFollowUpAddon
+from ..adapters.notifications.none import NoneNotifier
+from ..adapters.notifications.notify_send import NotifySendNotifier
+from ..adapters.notifications.stdout import StdoutNotifier
 from ..adapters.google.sheets.styling import GoogleSheetStyler
 from ..adapters.filesystem.state import DEFAULT_STATE_PATH
 from ..adapters.google.sheets.tracking import GoogleSheetsTrackingGateway
@@ -87,12 +92,13 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             )
             dependencies[program_id] = ProgramDependencies(
                 processor, participant_repository, session_results_repository, ranking_repository,
-                tracking_repository, follow_up_repository)
+                tracking_repository,
+                (IndividualFollowUpAddon(follow_up_repository, program.sessions),))
         return dependencies[program_id]
 
     return ProgramRunner(
         programs=programs,
-        drive=drive,
+        source=drive,
         dependencies_factory=make_dependencies,
         state_store=FileStateStore(state_path),
         discovery=select_and_inspect,
@@ -114,20 +120,27 @@ def _print_results(results: list[Any]) -> None:
         print(f"Failed: {result.sessions_failed}")
 
 
+def _notifier(name: str):
+    return {"none": NoneNotifier, "stdout": StdoutNotifier,
+            "notify-send": NotifySendNotifier}[name]()
+
+
 def main(argv: list[str] | None = None, *, runner_factory=build_runner,
-         notifier_factory=NotifySendNotifier) -> int:
+         notifier_factory=None) -> int:
     parser = argparse.ArgumentParser(description="Ejecuta una sincronización one-shot")
     parser.add_argument("--program", help="ID o nombre exacto del programa")
     parser.add_argument("--programs-path", type=Path, default=DEFAULT_PROGRAMS_PATH)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
     parser.add_argument("--no-notify", action="store_true", help="deshabilita notificaciones de escritorio")
+    parser.add_argument("--notifier", choices=("none", "stdout", "notify-send"),
+                        default=os.environ.get("PARTICIPACION_NOTIFIER", "none"))
     args = parser.parse_args(argv)
     try:
         results = runner_factory(args.programs_path, args.state_path).run(args.program)
         _print_results(results)
         if not args.no_notify:
             try:
-                notifier = notifier_factory()
+                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
                 for result in results:
                     notify_program_result(notifier, result)
             except Exception as exc:
@@ -137,7 +150,8 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
         print(f"ERROR: {type(exc).__name__}: {exc}")
         if not args.no_notify:
             try:
-                notifier_factory().notify(DesktopNotification(
+                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
+                notifier.notify(Notification(
                     "Error en participación",
                     f"{args.program or 'participacion-sync'} terminó con errores",
                     NotificationLevel.CRITICAL,

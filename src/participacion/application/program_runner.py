@@ -5,6 +5,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from ..core.models import ProgramInspection, ProgramRecord, SessionInspection
 from ..core.ranking import ProgramRanking, build_program_ranking
+from .events import AddonResult, ApplicationEvent, ProgramAddon, ProgramAddonContext
 from .session_processor import SessionProcessResult, SessionProcessStatus, SessionProcessor
 
 PROCESSING_PIPELINE_VERSION = 2
@@ -22,13 +23,13 @@ class ProgramDependencies:
     session_results_repository: Any
     ranking_repository: Any
     tracking_repository: Any | None = None
-    follow_up_repository: Any | None = None
+    addons: Sequence[ProgramAddon] = ()
 
 
 @dataclass(frozen=True)
 class ProgramRunResult:
     program_id: str
-    root_folder_id: str
+    root_source_ref: str
     program_name: str
     sessions_total: int
     sessions_processed: int
@@ -41,8 +42,8 @@ class ProgramRunResult:
     ranking_changed: bool
     ranking_entries: int
     tracking_changed: bool = False
-    follow_up_changed: bool = False
-    follow_up_critical_transitions: int = 0
+    addon_results: tuple[AddonResult, ...] = ()
+    events: tuple[ApplicationEvent, ...] = ()
     warnings: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     session_results: tuple[SessionProcessResult, ...] = ()
@@ -62,7 +63,7 @@ class ProgramRunner:
     source: Any
     dependencies_factory: Callable[[str, ProgramRecord], ProgramDependencies]
     state_store: StateStore
-    discovery: Callable[[Any, Mapping[str, ProgramRecord], dict[str, Any], str | None], list[ProgramInspection]]
+    discovery: Callable[..., list[ProgramInspection]]
 
     def run(self, program_id: str | None = None) -> list[ProgramRunResult]:
         state = self.state_store.load()
@@ -146,25 +147,37 @@ class ProgramRunner:
             except (OSError, RuntimeError, ValueError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
 
-        follow_up_changed = False
-        follow_up_critical_transitions = 0
-        if dependencies.follow_up_repository is not None:
+        addon_results: list[AddonResult] = []
+        events: list[ApplicationEvent] = []
+        session_statuses = {
+            session.session_number: sessions_state[session.source_ref]["status"]
+            for session in program.sessions if session.source_ref in sessions_state
+        }
+        for addon in dependencies.addons:
             try:
-                follow_up_result = dependencies.follow_up_repository.refresh(
-                    program.sessions,
-                    {session.session_number: sessions_state[session.folder_id]["status"]
-                     for session in program.sessions if session.folder_id in sessions_state},
-                    official=program.participant_mode == "official",
-                )
-                follow_up_changed = str(getattr(follow_up_result, "status", "NOOP")) != "NOOP"
-                follow_up_critical_transitions = int(getattr(follow_up_result, "critical_transitions", 0))
+                addon_result = addon.run(ProgramAddonContext(program, session_statuses))
             except (OSError, RuntimeError, ValueError) as exc:
-                errors.append(f"{type(exc).__name__}: {exc}")
+                addon_result = AddonResult(
+                    getattr(addon, "addon_id", type(addon).__name__),
+                    errors=(f"{type(exc).__name__}: {exc}",),
+                )
+            addon_results.append(addon_result)
+            events.extend(addon_result.events)
+            warnings.extend(addon_result.warnings)
+            errors.extend(addon_result.errors)
 
         counts = {status: sum(item.status is status for item in session_results)
                   for status in SessionProcessStatus}
+        if counts[SessionProcessStatus.FAILED] or errors:
+            events.append(ApplicationEvent("program.failed", pid, program.program_name, {}))
+        elif counts[SessionProcessStatus.INCOMPLETE] or counts[SessionProcessStatus.NEEDS_REVIEW]:
+            events.append(ApplicationEvent("program.requires_attention", pid, program.program_name, {}))
+        elif (sum(item.changed for item in session_results) > 0 or
+              ranking_changed or tracking_changed or
+              any(item.changed for item in addon_results)):
+            events.append(ApplicationEvent("program.updated", pid, program.program_name, {}))
         return ProgramRunResult(
-            program_id=pid, root_folder_id=program.folder_id, program_name=program.program_name,
+            program_id=pid, root_source_ref=program.source.ref, program_name=program.program_name,
             sessions_total=len(session_results), sessions_processed=counts[SessionProcessStatus.PROCESSED],
             sessions_skipped=counts[SessionProcessStatus.SKIPPED],
             sessions_incomplete=counts[SessionProcessStatus.INCOMPLETE],
@@ -174,8 +187,7 @@ class ProgramRunner:
             session_results_changed=sum(item.changed for item in session_results),
             ranking_changed=ranking_changed, ranking_entries=ranking_entries,
             tracking_changed=tracking_changed,
-            follow_up_changed=follow_up_changed,
-            follow_up_critical_transitions=follow_up_critical_transitions,
+            addon_results=tuple(addon_results), events=tuple(events),
             warnings=tuple(warnings), errors=tuple(errors),
             session_results=tuple(session_results),
         )
