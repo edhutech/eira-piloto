@@ -78,7 +78,7 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
                 participant_repository, session_results_repository, control_repository)
             resolver_factory = None
             if program.participant_mode in {"auto", "import", "official"}:
-                from .participants import ParticipantResolver
+                from ..core.participants import ParticipantResolver
                 resolver_factory = {
                     "auto": ParticipantResolver.auto,
                     "import": ParticipantResolver.imported,

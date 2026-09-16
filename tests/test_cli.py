@@ -2,8 +2,12 @@ import io
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from participacion.cli import main
+from participacion.cli.main import build_runner
+from participacion.core.models import ProgramRecord, ProviderRef
+from participacion.core.participants import ParticipantResolver
 
 
 class FakeRunner:
@@ -55,6 +59,30 @@ class CliTests(unittest.TestCase):
             code = main([], runner_factory=failing_factory)
         self.assertEqual(code, 1)
         self.assertIn("ERROR", output.getvalue())
+
+    def test_real_runner_dependency_factory_resolves_core_participant_resolver(self):
+        program = ProgramRecord(
+            "program", "Synthetic program", 1, "auto",
+            ProviderRef("fake", "folder"), ProviderRef("fake", "sheet"), (),
+        )
+        services = (object(), object(), object())
+        repositories = [SimpleNamespace(ensure_role_validation=lambda: None)]
+        processor = MagicMock()
+        with patch("participacion.cli.main.load_programs", return_value={"program": program}), \
+             patch("participacion.cli.main.get_google_services_with_docs", return_value=services), \
+             patch("participacion.cli.main._sheet_ids", return_value={}), \
+             patch("participacion.cli.main.ParticipantRepository", return_value=repositories[0]), \
+             patch("participacion.cli.main.SessionResultsRepository"), \
+             patch("participacion.cli.main.RankingRepository"), \
+             patch("participacion.cli.main.GoogleSheetsTrackingGateway"), \
+             patch("participacion.cli.main.TrackingRepository"), \
+             patch("participacion.cli.main.ControlRepository"), \
+             patch("participacion.cli.main.FollowUpRepository"), \
+             patch("participacion.cli.main.SessionProcessor", return_value=processor) as processor_constructor, \
+             patch("participacion.cli.main.GoogleSheetStyler"):
+            runner = build_runner()
+            dependencies = runner.dependencies_factory("program", program)
+        self.assertIs(processor_constructor.call_args.kwargs["resolver_factory"].__func__, ParticipantResolver.auto.__func__)
 
 
 if __name__ == "__main__":
