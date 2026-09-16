@@ -15,7 +15,8 @@ class DocxParser:
 
     def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int) -> ParseResult:
         if not isinstance(content, bytes):
-            return result("docx", "voice", [], "DOCX requiere contenido binario")
+            return ParseResult(False, "transcript", "voice", [], "docx", [],
+                               ["DOCX requiere contenido binario"])
         try:
             with zipfile.ZipFile(__import__("io").BytesIO(content)) as archive:
                 root = ET.fromstring(archive.read("word/document.xml"))

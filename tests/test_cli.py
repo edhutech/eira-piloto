@@ -2,7 +2,7 @@ import io
 import importlib
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -57,7 +57,7 @@ class CliTests(unittest.TestCase):
             with patch.object(CLI_MAIN_MODULE, "get_google_services_with_docs",
                        side_effect=AssertionError("Google must not initialize")):
                 output = io.StringIO()
-                with redirect_stdout(output):
+                with redirect_stderr(output):
                     code = main(["--programs-path", str(programs),
                                  "--state-path", str(Path(directory) / "state.json")])
         self.assertEqual(code, 1)
@@ -66,7 +66,7 @@ class CliTests(unittest.TestCase):
     def test_refresh_error_is_concise_and_uses_runtime_failure_event(self):
         output = io.StringIO()
         with patch.object(CLI_MAIN_MODULE, "notify_events") as notify:
-            with redirect_stdout(output):
+            with redirect_stderr(output):
                 code = main([], runner_factory=lambda programs, state:
                             (_ for _ in ()).throw(RefreshError("invalid_scope")))
         self.assertEqual(code, 1)
@@ -94,7 +94,7 @@ class CliTests(unittest.TestCase):
         def failing_factory(programs, state):
             raise RuntimeError("service unavailable")
         output = io.StringIO()
-        with redirect_stdout(output):
+        with redirect_stderr(output):
             code = main([], runner_factory=failing_factory)
         self.assertEqual(code, 1)
         self.assertIn("ERROR", output.getvalue())
@@ -118,7 +118,7 @@ class CliTests(unittest.TestCase):
              patch.object(CLI_MAIN_MODULE, "ControlRepository"), \
              patch.object(CLI_MAIN_MODULE, "FollowUpRepository"), \
              patch.object(CLI_MAIN_MODULE, "SessionProcessor", return_value=processor) as processor_constructor, \
-             patch.object(CLI_MAIN_MODULE, "GoogleSheetStyler"):
+             patch.object(CLI_MAIN_MODULE, "GoogleSheetsTrackingGateway"):
             runner = build_runner()
             dependencies = runner.dependencies_factory("program", program)
         self.assertIs(processor_constructor.call_args.kwargs["resolver_factory"].__func__, ParticipantResolver.auto.__func__)

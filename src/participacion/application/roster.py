@@ -60,7 +60,8 @@ class RosterImporter:
         self.repository = participant_repository
 
     def dry_run(self, records: Iterable[RosterRecord]) -> RosterPlan:
-        existing = self.repository.load()
+        read = getattr(self.repository, "load_read_only", self.repository.load)
+        existing = read()
         people = list(existing)
         records = list(records)
         duplicate_emails = _duplicate_roster_emails(records)

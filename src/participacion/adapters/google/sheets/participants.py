@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -171,7 +172,15 @@ class ParticipantRepository:
         return values
 
     def load_records(self) -> list[dict[str, Any]]:
-        values = self.migrate()
+        values = self.gateway.read_values()
+        if not values:
+            self.headers = list(CANONICAL_PARTICIPANT_HEADERS)
+            return []
+        headers = [str(value).strip() for value in values[0]]
+        keys = {strict_name_key(header) for header in headers}
+        if not set(map(strict_name_key, CANONICAL_PARTICIPANT_HEADERS)).issubset(keys):
+            raise RuntimeError("La hoja Participantes requiere migración explícita; ejecuta participacion-init")
+        self.headers = headers
         positions = self._positions()
         records = []
         for row in values[1:]:
@@ -181,11 +190,53 @@ class ParticipantRepository:
             records.append({header: padded[index] for header, index in positions.items()})
         return records
 
+    def load_read_only(self) -> list[Participant]:
+        """Read and canonicalize roster data in memory without any writes."""
+        values = self.gateway.read_values()
+        if not values:
+            self.headers = list(CANONICAL_PARTICIPANT_HEADERS)
+            return []
+        headers = [str(value).strip() for value in values[0]]
+        if not any(headers):
+            raise ValueError("La hoja Participantes no tiene encabezados válidos")
+        keys = [strict_name_key(header) for header in headers]
+        if len(keys) != len(set(keys)):
+            raise ValueError("La hoja Participantes contiene encabezados duplicados")
+        working_headers = headers + [name for name in CANONICAL_PARTICIPANT_HEADERS
+                                     if strict_name_key(name) not in keys]
+        positions = {strict_name_key(header): index for index, header in enumerate(working_headers)}
+        records: list[Participant] = []
+        identifiers: set[str] = set()
+        for row_number, row in enumerate(values[1:], 2):
+            padded = list(row) + [""] * (len(working_headers) - len(row))
+            if not any(str(value).strip() for value in padded):
+                continue
+            name = str(padded[positions["nombre"]]).strip()
+            if not name:
+                raise ValueError(f"La fila {row_number} requiere nombre")
+            participant_id = str(padded[positions["participant_id"]]).strip()
+            if not participant_id:
+                participant_id = "readonly_" + hashlib.sha256(
+                    (name + "\x00" + str(padded[positions["correo"]]).strip()).encode("utf-8")
+                ).hexdigest()[:24]
+            if participant_id in identifiers:
+                raise ValueError(f"participant_id duplicado en la fila {row_number}")
+            identifiers.add(participant_id)
+            role = str(padded[positions["role"]]).strip() or "participant"
+            if role not in PARTICIPANT_ROLES:
+                raise ValueError(f"Rol inválido en la fila {row_number}: {role}")
+            record = {header: padded[index] for header, index in positions.items()}
+            record["participant_id"] = participant_id
+            record["role"] = role
+            records.append(_record_to_participant(record))
+        self.headers = working_headers
+        return records
+
     def load(self) -> list[Participant]:
         return [_record_to_participant(record) for record in self.load_records()]
 
     def upsert(self, participants: list[Participant]) -> None:
-        records = self.load_records()
+        records = self._load_for_write()
         existing_ids = {str(record["participant_id"]).strip() for record in records}
         positions = self._positions()
         seen = set()
@@ -222,7 +273,7 @@ class ParticipantRepository:
                 raise RuntimeError("No se pudieron verificar participantes: " + ", ".join(sorted(missing)))
 
     def update_fields(self, updates: dict[str, dict[str, Any]]) -> None:
-        records = self.load_records()
+        records = self._load_for_write()
         positions = self._positions()
         by_id = {str(record["participant_id"]).strip(): index for index, record in enumerate(records, 2)}
         for participant_id, fields in updates.items():
@@ -243,6 +294,15 @@ class ParticipantRepository:
 
     def _positions(self) -> dict[str, int]:
         return {strict_name_key(header): index for index, header in enumerate(self.headers)}
+
+    def _load_for_write(self) -> list[dict[str, Any]]:
+        try:
+            return self.load_records()
+        except RuntimeError as exc:
+            if "requiere migración explícita" not in str(exc):
+                raise
+            self.migrate()
+            return self.load_records()
 
     def _verify_header_values(self, values: list[list[Any]], expected: list[str]) -> None:
         if not values or values[0][:len(expected)] != expected:

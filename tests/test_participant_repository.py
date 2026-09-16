@@ -97,6 +97,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
     def test_legacy_sheet_migrates_to_new_contract(self):
         backend = FakeSheetsValues([["nombre", "correo", "aliases", "source", "status"], ["Alice", "a@example.com", "Alicia", "import", "new"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         participants = repository.load()
         self.assertEqual(repository.headers, ["nombre", "correo", "aliases", "source", "status", "participant_id", "role", "enrollment_status", "start_session", "end_session"])
         self.assertEqual(participants[0].nombre, "Alice")
@@ -106,6 +107,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
     def test_repeated_migration_preserves_ids(self):
         backend = FakeSheetsValues([["nombre", "correo"], ["Alice", "a@example.com"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         first = repository.load()[0].participant_id
         second = repository.load()[0].participant_id
         self.assertEqual(first, second)
@@ -113,29 +115,36 @@ class ParticipantRepositoryTests(unittest.TestCase):
     def test_unknown_columns_are_preserved(self):
         backend = FakeSheetsValues([["correo", "departamento", "nombre"], ["a@example.com", "Norte", "Alice"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         repository.load()
         self.assertEqual(backend.values[0][1], "departamento")
         self.assertEqual(backend.values[1][1], "Norte")
 
     def test_existing_participant_id_is_preserved(self):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo"], ["p1", "Alice", "a@example.com"]])
-        participant = ParticipantRepository(backend).load()[0]
+        repository = ParticipantRepository(backend)
+        repository.migrate()
+        participant = repository.load()[0]
         self.assertEqual(participant.participant_id, "p1")
 
     def test_missing_id_is_created_once(self):
         backend = FakeSheetsValues([["nombre", "correo"], ["Alice", "a@example.com"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         identifier = repository.load()[0].participant_id
         self.assertEqual(repository.load()[0].participant_id, identifier)
         self.assertEqual(len([cell for cell in backend.values[1] if cell == identifier]), 1)
 
     def test_missing_role_defaults_to_participant(self):
         backend = FakeSheetsValues([["participant_id", "nombre"], ["p1", "Alice"]])
-        self.assertEqual(ParticipantRepository(backend).load()[0].role, "participant")
+        repository = ParticipantRepository(backend)
+        repository.migrate()
+        self.assertEqual(repository.load()[0].role, "participant")
 
     def test_manual_fields_are_preserved_on_upsert(self):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"], ["p1", "Canonical", "manual@example.com", "Alias manual\nSegundo alias", "facilitator", "import", "verified"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         repository.load()
         repository.upsert([Participant("p1", "Observed", "observed@example.com", ["Observed alias"], "participant", "auto", "unverified")])
         current = ParticipantRepository(backend).load()[0]
@@ -152,6 +161,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
     def test_auto_new_participant_is_inserted_and_reused(self):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
         repository = ParticipantRepository(backend)
+        repository.migrate()
         resolver = ParticipantResolver.auto(repository.load_records())
         created = resolver.resolve("Alice")
         repository.upsert([created.participant])
@@ -177,7 +187,7 @@ class ParticipantRepositoryTests(unittest.TestCase):
         backend = FakeSheetsValues([["participant_id", "nombre", "correo", "aliases", "role", "source", "status"]])
         ParticipantRepository(backend).upsert([Participant(f"p{index}", f"Person {index}") for index in range(49)])
         self.assertEqual(len(backend.values), 50)
-        self.assertEqual(backend.reads, 3)
+        self.assertEqual(backend.reads, 5)
         self.assertEqual(len(backend.appends), 1)
 
     def test_partial_batch_recovers_without_duplicates(self):
@@ -205,13 +215,13 @@ class ParticipantRepositoryTests(unittest.TestCase):
     def test_invalid_row_raises_explicit_error(self):
         backend = FakeSheetsValues([["nombre", "correo"], ["", "a@example.com"]])
         with self.assertRaisesRegex(ValueError, "fila 2.*nombre"):
-            ParticipantRepository(backend).load()
+            ParticipantRepository(backend).migrate()
         self.assertEqual(backend.writes, [])
 
     def test_duplicate_participant_ids_raise_error(self):
         backend = FakeSheetsValues([["participant_id", "nombre"], ["p1", "Alice"], ["p1", "Bob"]])
         with self.assertRaisesRegex(ValueError, "participant_id"):
-            ParticipantRepository(backend).load()
+            ParticipantRepository(backend).migrate()
 
 
 if __name__ == "__main__":

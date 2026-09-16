@@ -136,7 +136,8 @@ class ProgramRunner:
             errors.append(f"{type(exc).__name__}: {exc}")
 
         tracking_changed = False
-        if dependencies.tracking_repository is not None:
+        if (dependencies.tracking_repository is not None and
+                any(item.status is not SessionProcessStatus.SKIPPED for item in session_results)):
             try:
                 tracking_result = dependencies.tracking_repository.refresh(
                     program.sessions,

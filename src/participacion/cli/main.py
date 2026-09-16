@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from ..addons.follow_up.addon import IndividualFollowUpAddon
 from ..adapters.notifications.none import NoneNotifier
 from ..adapters.notifications.notify_send import NotifySendNotifier
 from ..adapters.notifications.stdout import StdoutNotifier
-from ..adapters.google.sheets.styling import GoogleSheetStyler
+
 from ..adapters.filesystem.state import DEFAULT_STATE_PATH
 from ..adapters.google.sheets.tracking import GoogleSheetsTrackingGateway
 from ..application.tracking import TrackingRepository
@@ -75,10 +76,7 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             ranking_repository = RankingRepository(
                 GoogleSheetsRankingGateway(
                     sheets, program.sheet_id, ids.get("Ranking"), "Ranking"))
-            participant_repository.ensure_role_validation()
             tracking_gateway = GoogleSheetsTrackingGateway(sheets, program.sheet_id, "Seguimiento")
-            tracking_gateway.ensure_sheet(len(program.sessions))
-            GoogleSheetStyler(sheets, program.sheet_id).apply()
             tracking_repository = TrackingRepository(
                 tracking_gateway,
                 participant_repository, session_results_repository)
@@ -150,7 +148,7 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
     try:
         results = runner_factory(args.programs_path, args.state_path).run(args.program)
         if not results:
-            print("ERROR: no hay programas registrados; ejecuta participacion-init")
+            print("ERROR: no hay programas registrados; ejecuta participacion-init", file=sys.stderr)
             if not args.no_notify:
                 try:
                     notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
@@ -170,7 +168,7 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
                 logger.warning("notification failed: %s", exc)
         return 1 if any(result.sessions_failed or result.errors for result in results) else 0
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}")
+        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         if not args.no_notify:
             try:
                 notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
@@ -183,7 +181,7 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
     except Exception as exc:
         if not is_expected_google_error(exc):
             raise
-        print(f"ERROR: {format_google_error(exc)}")
+        print(f"ERROR: {format_google_error(exc)}", file=sys.stderr)
         if not args.no_notify:
             try:
                 notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)

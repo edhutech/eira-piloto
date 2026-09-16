@@ -58,7 +58,7 @@ def inspect_program(drive: Any, program: ProgramRecord, state: dict[str, Any], p
 
 
 def select_and_inspect(drive: Any, programs: dict[str, ProgramRecord], state: dict[str, Any], program_id: str | None = None) -> list[ProgramInspection]:
-    return [inspect_program(drive, program, state, program.folder_id)
+    return [inspect_program(drive, program, state, program.program_id)
             for program in select_programs(programs, program_id)]
 
 
