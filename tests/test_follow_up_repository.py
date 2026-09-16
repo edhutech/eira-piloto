@@ -1,12 +1,9 @@
-from decimal import Decimal
 import unittest
 
 from participacion.adapters.google.sheets.follow_up import (FOLLOW_UP_HEADERS, FollowUpRepository,
-                                           FollowUpWriteResult, follow_up_values)
-from participacion.addons.follow_up.follow_up import build_program_follow_up
+                                           FollowUpWriteResult)
 from participacion.core.models import SessionRecord
 from participacion.core.participants import Participant
-from participacion.core.scoring import ParticipantSessionScore
 
 
 class Gateway:

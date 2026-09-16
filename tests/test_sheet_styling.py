@@ -1,5 +1,4 @@
 import unittest
-from types import SimpleNamespace
 from typing import Any
 
 from participacion.adapters.google.sheets.styling import GoogleSheetStyler, PALETTE

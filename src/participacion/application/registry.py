@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -10,7 +11,7 @@ from ..core.models import ProgramRecord, ProviderRef, SessionRecord
 DEFAULT_PROGRAMS_PATH = Path(os.environ.get(
     "PARTICIPACION_CONFIG_DIR", Path.home() / ".config" / "participacion"
 )) / "programs.json"
-
+REGISTRY_VERSION = 1
 SUPPORTED_SOURCE_PROVIDERS = {"google_drive"}
 SUPPORTED_OUTPUT_PROVIDERS = {"google_sheets"}
 PARTICIPANT_MODES = {"auto", "import", "official"}
@@ -62,8 +63,6 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
     if not isinstance(raw_sessions, list):
         raise ValueError("sessions debe ser una lista")
     sessions = tuple(sorted((_session(item) for item in raw_sessions), key=lambda item: item.session_number))
-    if any(session.session_number < 1 for session in sessions):
-        raise ValueError("session_number debe ser positivo")
     if len({session.session_number for session in sessions}) != len(sessions):
         raise ValueError("session_number debe ser único")
     if any(not session.source_ref.strip() for session in sessions):
@@ -81,15 +80,8 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
     else:
         source = ProviderRef("google_drive", _required_text(value.get("folder_id"), "source.ref"), {"url": str(value.get("folder_url", ""))})
         output = ProviderRef("google_sheets", _required_text(value.get("sheet_id"), "output.ref"))
-    return ProgramRecord(
-        program_id=program_id,
-        program_name=str(value["program_name"]),
-        session_count=session_count,
-        participant_mode=participant_mode,
-        source=source,
-        output=output,
-        sessions=sessions,
-    )
+    return ProgramRecord(program_id, str(value["program_name"]), session_count,
+                         participant_mode, source, output, sessions)
 
 
 def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord]:
@@ -98,6 +90,12 @@ def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("programs.json debe contener un objeto JSON")
+    if "version" in raw:
+        if raw.get("version") != REGISTRY_VERSION:
+            raise ValueError(f"Versión de programs.json no soportada: {raw.get('version')}")
+        raw = raw.get("programs")
+        if not isinstance(raw, dict):
+            raise ValueError("programs.json v1 requiere programs")
     programs = {}
     for registry_id, value in raw.items():
         program = _program(value)
@@ -105,6 +103,42 @@ def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord
             raise ValueError(f"La clave del registro no coincide con program_id: {registry_id}")
         programs[program.program_id] = program
     return programs
+
+
+def _encode_program(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any]:
+    if isinstance(program, Mapping):
+        return dict(program)
+    source: dict[str, Any] = {"provider": program.source.provider, "ref": program.source.ref}
+    output: dict[str, Any] = {"provider": program.output.provider, "ref": program.output.ref}
+    if program.source.metadata is not None:
+        source["metadata"] = dict(program.source.metadata)
+    if program.output.metadata is not None:
+        output["metadata"] = dict(program.output.metadata)
+    return {"program_id": program.program_id, "program_name": program.program_name,
+            "session_count": program.session_count, "participant_mode": program.participant_mode,
+            "source": source, "output": output,
+            "sessions": [{"session_number": s.session_number, "session_name": s.session_name,
+                          "source_ref": s.source_ref} for s in program.sessions]}
+
+
+def save_programs(path: Path, programs: Mapping[str, ProgramRecord | Mapping[str, Any]]) -> None:
+    payload = {"version": REGISTRY_VERSION,
+               "programs": {key: _encode_program(program) for key, program in programs.items()}}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def select_programs(programs: dict[str, ProgramRecord], program_id: str | None = None) -> list[ProgramRecord]:

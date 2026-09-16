@@ -6,11 +6,9 @@ from typing import Any, Protocol, cast
 
 from ....core.participants import Participant, Role, strict_name_key
 from ..retry import execute_with_transient_retry
+from .schema import PARTICIPANT_HEADERS
 
-CANONICAL_PARTICIPANT_HEADERS = [
-    "participant_id", "nombre", "correo", "aliases", "role", "source", "status",
-    "enrollment_status", "start_session", "end_session",
-]
+CANONICAL_PARTICIPANT_HEADERS = PARTICIPANT_HEADERS
 PARTICIPANT_ROLES = {"participant", "facilitator", "other"}
 
 

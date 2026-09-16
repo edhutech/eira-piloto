@@ -1,8 +1,11 @@
 # participacion-agent
 
-Deterministic, one-shot participation tracking for turning session evidence
+An open-source deterministic CLI application for one-shot participation tracking from session evidence
 (voice and chat) into auditable results, cumulative follow-up, and optional
 longitudinal signals.
+
+It currently includes a Google Workspace adapter and requires no LLM at
+runtime. Supported Python versions are 3.10 through 3.14.
 
 ## What it is
 
@@ -64,6 +67,10 @@ with `PARTICIPACION_GOOGLE_CLIENT_SECRET`. Never commit either file.
 2. Run `participacion-init` and confirm its dry-run plan once.
 3. Put or upload session evidence in the prepared folders.
 4. Run `participacion-sync`.
+
+If sync reports that the `Participantes` sheet requires migration, run
+`participacion-init` and confirm its plan. Planning and cancellation are
+read-only; migration occurs only after confirmation.
 
 Commands:
 

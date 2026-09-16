@@ -15,8 +15,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ...application.init_program import InitPlan, build_plan, validate_participant_columns, validate_session_count, session_folder_name
+from ...application.init_program import InitPlan, build_plan, validate_session_count
+from ...application.registry import load_programs, save_programs
 from ...application.roster import roster_records_from_rows, roster_records_to_participants
+from .sheets.schema import (CONTROL_HEADERS, PARTICIPANT_HEADERS, PROGRAM_HEADERS,
+                            RANKING_HEADERS, REQUIRED_SHEETS, SESSION_HEADERS)
 from ..roster.csv_source import read_csv_roster
 from ..roster.google_source import read_google_roster
 from ..roster.xlsx_source import read_xlsx_roster
@@ -27,27 +30,7 @@ REGISTRY_PATH = Path(os.environ.get(
 )) / "programs.json"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-REQUIRED_SHEETS = ["Seguimiento", "Seguimiento individual", "Ranking", "Participantes", "Control", "Sesiones", "Programa"]
-PARTICIPANT_HEADERS = ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"]
-SESSION_HEADERS = [
-    "session_number", "session_name", "participant_id", "participant", "email",
-    "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
-    "score", "scoring_complete", "countability_ruleset_version",
-]
-RANKING_HEADERS = [
-    "rank", "participant_id", "participant", "email", "sessions_with_activity",
-    "voice_total", "voice_valid_total", "chat_total", "chat_valid_total",
-    "score_total", "ranking_complete",
-]
-CONTROL_HEADERS = [
-    "session_number", "session_name", "folder_id", "transcript_status",
-    "chat_status", "processing_status", "last_processed_at", "tracking_eligible",
-]
-PROGRAM_HEADERS = [
-    "program_id", "program_name", "session_count", "participant_mode",
-    "source_provider", "source_ref", "source_url", "output_provider", "output_ref",
-    "created_at", "follow_up_ruleset_version",
-]
+
 
 
 def extract_folder_id(url: str) -> str:
@@ -261,17 +244,16 @@ def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[
     GoogleSheetStyler(sheets, sheet_id).apply()
     if ids.get("Participantes") is not None:
         ParticipantRepository(GoogleSheetsValuesGateway(
-            sheets, sheet_id, "Participantes", ids["Participantes"])).ensure_role_validation()
+            sheets, sheet_id, "Participantes", ids["Participantes"])).migrate()
     record = {"program_id": plan.folder_id, "program_name": plan.program_name,
               "session_count": plan.session_count, "participant_mode": plan.participant_mode,
               "source": {"provider": "google_drive", "ref": plan.folder_id,
                          "metadata": {"url": plan.folder_url}},
               "output": {"provider": "google_sheets", "ref": sheet_id},
               "sessions": session_records, "created_at": dt.datetime.now(dt.timezone.utc).isoformat()}
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing = json.loads(REGISTRY_PATH.read_text(encoding="utf-8")) if REGISTRY_PATH.exists() else {}
+    existing = load_programs(REGISTRY_PATH)
     existing[plan.folder_id] = record
-    REGISTRY_PATH.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    save_programs(REGISTRY_PATH, existing)
     return record
 
 

@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from ..core.models import ProgramInspection, ProgramRecord, SessionInspection
 from ..core.ranking import ProgramRanking, build_program_ranking
 from .events import AddonResult, ApplicationEvent, ProgramAddon, ProgramAddonContext
 from .session_processor import SessionProcessResult, SessionProcessStatus, SessionProcessor
+from .ports.contracts import StateStore
 
 PROCESSING_PIPELINE_VERSION = 2
-
-
-class StateStore(Protocol):
-    def load(self) -> dict[str, Any]: ...
-    def save(self, state: dict[str, Any]) -> None: ...
 
 
 @dataclass

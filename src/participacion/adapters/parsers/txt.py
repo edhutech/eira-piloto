@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ...core.models import SourceArtifact, NormalizedEvent
+from ...core.models import SourceArtifact
 from .base import ParseResult, result, speaker_events, text_content
 
 

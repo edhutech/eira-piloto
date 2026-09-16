@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ..adapters.google.auth import authorize, client_secret_path, token_path
+from ..adapters.google.auth import authorize
 
 
 def main(argv: list[str] | None = None) -> int:

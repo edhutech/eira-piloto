@@ -8,17 +8,9 @@ from ....addons.follow_up.follow_up import (FOLLOW_UP_RULESET_VERSION, FollowUpE
                                             ProgramFollowUp, build_program_follow_up)
 from ....core.models import SessionRecord
 from ..retry import execute_with_transient_retry
-from ....core.participants import Participant
-from ....core.scoring import ParticipantSessionScore
+from .schema import FOLLOW_UP_HEADERS
 
 FOLLOW_UP_TITLE = "Seguimiento individual"
-FOLLOW_UP_HEADERS = [
-    "participant_id", "Participante", "Email", "Matrícula", "Sesiones elegibles",
-    "Participó", "Frecuencia", "Últimas 4", "Última participación", "Score acumulado",
-    "Seguimiento", "Desde", "Motivo", "Nota / Acción", "follow_up_ruleset_version",
-]
-
-
 @dataclass(frozen=True)
 class FollowUpWriteResult:
     status: str

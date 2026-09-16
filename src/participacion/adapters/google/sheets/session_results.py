@@ -7,13 +7,9 @@ from typing import Any, Mapping, Protocol, Sequence
 from ..retry import execute_with_transient_retry
 from ....core.models import ParticipantSnapshot
 from ....core.scoring import ParticipantSessionScore
+from .schema import SESSION_HEADERS
 
-
-CANONICAL_SESSION_HEADERS = [
-    "session_number", "session_name", "participant_id", "participant", "email",
-    "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total",
-    "score", "scoring_complete", "countability_ruleset_version",
-]
+CANONICAL_SESSION_HEADERS = SESSION_HEADERS
 CANONICAL_SESSION_KEYS = {str(header).strip().casefold() for header in CANONICAL_SESSION_HEADERS}
 NUMERIC_SESSION_KEYS = {
     "session_number", "voice_total", "voice_valid", "chat_total", "chat_valid",

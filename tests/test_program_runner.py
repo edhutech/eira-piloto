@@ -2,15 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from participacion.core.models import SourceArtifact, FileChange, FileStatus, ProgramInspection, ProgramRecord, ProviderRef, SessionInspection, SessionRecord
 from participacion.adapters.filesystem.state import FileStateStore
 from participacion.application.program_runner import ProgramDependencies, ProgramRunner
 from participacion.application.events import AddonResult
-from participacion.core.ranking import build_program_ranking
 from participacion.application.session_processor import SessionProcessResult, SessionProcessStatus
-from participacion.adapters.filesystem.state import empty_state, file_fingerprint, load_state
+from participacion.adapters.filesystem.state import empty_state, load_state
 from participacion.core.participants import Participant
 from participacion.core.scoring import ParticipantSessionScore
 from decimal import Decimal

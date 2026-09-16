@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from participacion.addons.follow_up.addon import IndividualFollowUpAddon
-from participacion.application.events import ApplicationEvent, ProgramAddonContext
+from participacion.application.events import ProgramAddonContext
 from participacion.application.notifications import Notification, NotificationLevel
 from participacion.adapters.notifications.none import NoneNotifier
 from participacion.adapters.notifications.stdout import StdoutNotifier

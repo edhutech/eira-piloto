@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 from ..retry import execute_with_transient_retry
+from .schema import STATIC_HEADERS
 
 
 PALETTE = {
@@ -20,14 +21,7 @@ PALETTE = {
     "facilitator": {"red": 0.918, "green": 0.863, "blue": 0.961},
 }
 
-HEADERS = {
-    "Programa": ["nombre_programa", "folder_id", "folder_url", "session_count", "participant_mode", "created_at", "follow_up_ruleset_version"],
-    "Sesiones": ["session_number", "session_name", "participant_id", "participant", "email", "voice_total", "voice_valid", "chat_total", "chat_valid", "ambiguous_total", "score", "scoring_complete", "countability_ruleset_version"],
-    "Participantes": ["participant_id", "nombre", "correo", "aliases", "role", "source", "status", "enrollment_status", "start_session", "end_session"],
-    "Ranking": ["rank", "participant_id", "participant", "email", "sessions_with_activity", "voice_total", "voice_valid_total", "chat_total", "chat_valid_total", "score_total", "ranking_complete"],
-    "Control": ["session_number", "session_name", "folder_id", "transcript_status", "chat_status", "processing_status", "last_processed_at", "tracking_eligible"],
-    "Seguimiento individual": ["participant_id", "Participante", "Email", "Matrícula", "Sesiones elegibles", "Participó", "Frecuencia", "Últimas 4", "Última participación", "Score acumulado", "Seguimiento", "Desde", "Motivo", "Nota / Acción", "follow_up_ruleset_version"],
-}
+HEADERS = STATIC_HEADERS
 
 
 @dataclass(frozen=True)

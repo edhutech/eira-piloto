@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from types import SimpleNamespace
-from typing import Any, Callable, Iterable, Protocol, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from ..core.countability import COUNTABILITY_RULESET_VERSION, classify_event
 from ..core.models import SourceArtifact, SessionInspection
 from ..core.participants import Participant, ParticipantResolver, ResolutionStatus
 from ..core.scoring import ParticipantSessionScore, score_events
 from ..core.models import ParticipantSnapshot
+from .ports.contracts import ContentReader, SessionResultsStore
 
 
 class SessionProcessStatus(str, Enum):
@@ -62,25 +63,14 @@ class SessionProcessResult:
     errors: tuple[str, ...] = ()
 
 
-class ContentLoader(Protocol):
-    def read(self, file: SourceArtifact) -> Any: ...
-
-
-class SessionResultsWriter(Protocol):
-    def replace_session(self, session_number: int, session_name: str,
-                        scores: Sequence[ParticipantSessionScore],
-                        participant_snapshots: dict[str, ParticipantSnapshot],
-                        *, ruleset_version: int = 1) -> Any: ...
-
-
 @dataclass
 class SessionProcessor:
     """Orchestrate one complete session without owning sync state."""
 
-    content_loader: ContentLoader | Callable[[SourceArtifact], Any]
+    content_loader: ContentReader | Callable[[SourceArtifact], Any]
     parsers: Sequence[Any]
     participant_repository: Any
-    session_results_repository: SessionResultsWriter
+    session_results_repository: SessionResultsStore
     resolver_factory: Callable[[Iterable[dict[str, Any]]], ParticipantResolver] | None = None
 
     def process(self, inspection: SessionInspection) -> SessionProcessResult:

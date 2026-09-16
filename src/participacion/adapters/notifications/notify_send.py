@@ -4,7 +4,7 @@ import logging
 import shutil
 import subprocess
 
-from ...application.notifications import Notification, NotificationLevel, Notifier
+from ...application.notifications import Notification, NotificationLevel
 
 logger = logging.getLogger(__name__)
 
