@@ -1,13 +1,16 @@
 import io
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from participacion.cli import main
 from participacion.cli.main import build_runner
 from participacion.core.models import ProgramRecord, ProviderRef
 from participacion.core.participants import ParticipantResolver
+from google.auth.exceptions import RefreshError
 
 
 class FakeRunner:
@@ -34,11 +37,44 @@ class CliTests(unittest.TestCase):
         self.assertIn("Processed: 1", output.getvalue())
 
     def test_cli_optional_program_selection_is_forwarded(self):
-        runner = FakeRunner([])
+        runner = FakeRunner([SimpleNamespace(
+            program_name="Programa", session_results=[], ranking_changed=False,
+            sessions_processed=0, sessions_skipped=0, sessions_incomplete=0,
+            sessions_needs_review=0, sessions_failed=0, errors=(), events=(),
+        )])
         with redirect_stdout(io.StringIO()):
             code = main(["--program", "Programa"], runner_factory=lambda programs, state: runner)
         self.assertEqual(code, 0)
         self.assertEqual(runner.calls, ["Programa"])
+
+    def test_empty_registry_fails_without_initializing_google(self):
+        with tempfile.TemporaryDirectory() as directory:
+            programs = Path(directory) / "programs.json"
+            programs.write_text("{}", encoding="utf-8")
+            with patch("participacion.cli.main.get_google_services_with_docs",
+                       side_effect=AssertionError("Google must not initialize")):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    code = main(["--programs-path", str(programs),
+                                 "--state-path", str(Path(directory) / "state.json")])
+        self.assertEqual(code, 1)
+        self.assertIn("ejecuta participacion-init", output.getvalue())
+
+    def test_refresh_error_is_concise_and_uses_runtime_failure_event(self):
+        output = io.StringIO()
+        with patch("participacion.cli.main.notify_events") as notify:
+            with redirect_stdout(output):
+                code = main([], runner_factory=lambda programs, state:
+                            (_ for _ in ()).throw(RefreshError("invalid_scope")))
+        self.assertEqual(code, 1)
+        self.assertIn("participacion-google-auth", output.getvalue())
+        self.assertNotIn("Traceback", output.getvalue())
+        self.assertEqual(notify.call_args.args[1][0].event_type, "runtime.failed")
+
+    def test_unexpected_programming_error_is_not_swallowed(self):
+        with self.assertRaises(AssertionError):
+            main([], runner_factory=lambda programs, state:
+                 (_ for _ in ()).throw(AssertionError("programming defect")))
 
     def test_cli_returns_one_when_runner_reports_failed_session_or_error(self):
         for failed, errors in ((1, ()), (0, ("ranking failure",))):

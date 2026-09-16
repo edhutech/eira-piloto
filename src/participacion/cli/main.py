@@ -29,6 +29,7 @@ from ..adapters.google.sheets.styling import GoogleSheetStyler
 from ..adapters.filesystem.state import DEFAULT_STATE_PATH
 from ..adapters.google.sheets.tracking import GoogleSheetsTrackingGateway
 from ..application.tracking import TrackingRepository
+from ..adapters.google.errors import format_google_error, is_expected_google_error
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,16 @@ def _sheet_ids(sheets: Any, spreadsheet_id: str) -> dict[str, int]:
 def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
                  state_path: Path = DEFAULT_STATE_PATH) -> ProgramRunner:
     programs = load_programs(programs_path)
+    if not programs:
+        def no_dependencies(program_id: str, program: Any) -> ProgramDependencies:
+            raise RuntimeError("No hay dependencias para un registro vacío")
+        return ProgramRunner(
+            programs=programs,
+            source=None,
+            dependencies_factory=no_dependencies,
+            state_store=FileStateStore(state_path),
+            discovery=select_and_inspect,
+        )
     drive, sheets, docs = get_google_services_with_docs()
     dependencies: dict[str, ProgramDependencies] = {}
 
@@ -138,6 +149,17 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
     args = parser.parse_args(argv)
     try:
         results = runner_factory(args.programs_path, args.state_path).run(args.program)
+        if not results:
+            print("ERROR: no hay programas registrados; ejecuta participacion-init")
+            if not args.no_notify:
+                try:
+                    notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
+                    notify_events(notifier, (ApplicationEvent(
+                        "runtime.failed", "", "participacion-sync", {},
+                    ),))
+                except Exception as notify_exc:
+                    logger.warning("notification failed: %s", notify_exc)
+            return 1
         _print_results(results)
         if not args.no_notify:
             try:
@@ -149,6 +171,19 @@ def main(argv: list[str] | None = None, *, runner_factory=build_runner,
         return 1 if any(result.sessions_failed or result.errors for result in results) else 0
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}")
+        if not args.no_notify:
+            try:
+                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
+                notify_events(notifier, (ApplicationEvent(
+                    "runtime.failed", "", args.program or "participacion-sync", {},
+                ),))
+            except Exception as notify_exc:
+                logger.warning("notification failed: %s", notify_exc)
+        return 1
+    except Exception as exc:
+        if not is_expected_google_error(exc):
+            raise
+        print(f"ERROR: {format_google_error(exc)}")
         if not args.no_notify:
             try:
                 notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)

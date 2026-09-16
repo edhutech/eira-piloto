@@ -77,7 +77,7 @@ class NotificationTests(unittest.TestCase):
         runner = SimpleNamespace(run=lambda program_id=None: [])
         def factory(programs, state): return runner
         def forbidden(): raise AssertionError("notifier should be disabled")
-        self.assertEqual(main(["--no-notify"], runner_factory=factory, notifier_factory=forbidden), 0)
+        self.assertEqual(main(["--no-notify"], runner_factory=factory, notifier_factory=forbidden), 1)
 
     def test_addon_only_change_is_silent(self):
         addon_event = event("follow_up.updated", {"count": 1})
