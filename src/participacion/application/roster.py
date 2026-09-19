@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence, cast
 
-from ..core.participants import Participant, strict_name_key
+from ..core.participants import Participant, Role, strict_name_key
+from .aliases import decode_aliases, encode_aliases
 
 WAITING_FOR_OFFICIAL_ROSTER = "WAITING_FOR_OFFICIAL_ROSTER"
 
@@ -18,6 +19,7 @@ class RosterRecord:
     start_session: int = 1
     end_session: int | None = None
     participant_id: str | None = None
+    aliases: tuple[str, ...] = ()
 
 
 class RosterAction(str):
@@ -112,12 +114,15 @@ class RosterImporter:
             if item.action == RosterAction.CREATE:
                 new_people.append(Participant(
                     item.participant_id or _stable_official_id(record), record.nombre, record.correo,
-                    [], "participant", "official", "unverified", record.enrollment_status,
+                    list(record.aliases), cast(Role, "participant"), "official", "unverified", record.enrollment_status,
                     record.start_session, record.end_session,
                 ))
             elif item.action == RosterAction.UPDATE and item.participant_id in existing:
-                updates[item.participant_id] = {
+                participant_id = item.participant_id
+                assert participant_id is not None
+                updates[participant_id] = {
                     "nombre": record.nombre, "correo": record.correo,
+                    "aliases": encode_aliases(record.aliases),
                     "enrollment_status": record.enrollment_status,
                     "start_session": record.start_session,
                     "end_session": record.end_session if record.end_session is not None else "",
@@ -153,6 +158,8 @@ def _duplicate_roster_emails(records: Sequence[RosterRecord]) -> set[str]:
 
 def _needs_update(person: Participant, record: RosterRecord) -> bool:
     return (person.nombre != record.nombre or person.correo != record.correo or
+            {strict_name_key(value) for value in person.aliases or []} !=
+            {strict_name_key(value) for value in record.aliases} or
             person.enrollment_status != record.enrollment_status or
             person.start_session != record.start_session or person.end_session != record.end_session)
 
@@ -197,7 +204,7 @@ def roster_records_to_participants(records: Iterable[RosterRecord], source: str)
     """Adapt canonical roster records to the initialization sheet contract."""
     return [{
         "participant_id": record.participant_id or "", "nombre": record.nombre, "correo": record.correo,
-        "aliases": "", "role": record.role or "participant", "source": source, "status": "new",
+        "aliases": encode_aliases(record.aliases), "role": record.role or "participant", "source": source, "status": "new",
         "enrollment_status": record.enrollment_status,
         "start_session": str(record.start_session),
         "end_session": "" if record.end_session is None else str(record.end_session),
@@ -212,10 +219,12 @@ def _record_from_mapping(row: Mapping[str, Any]) -> RosterRecord:
         raise ValueError("Cada fila del roster requiere nombre y correo")
     end = normalized.get("end_session", "")
     return RosterRecord(
-        name, email,
-        str(normalized.get("role", "") or "").strip() or None,
-        str(normalized.get("enrollment_status", "active") or "active").strip(),
-        int(float(normalized.get("start_session", 1) or 1)),
-        None if str(end or "").strip() == "" else int(float(end)),
-        str(normalized.get("participant_id", "") or "").strip() or None,
+        nombre=name,
+        correo=email,
+        role=str(normalized.get("role", "") or "").strip() or None,
+        enrollment_status=str(normalized.get("enrollment_status", "active") or "active").strip(),
+        start_session=int(float(normalized.get("start_session", 1) or 1)),
+        end_session=None if str(end or "").strip() == "" else int(float(end)),
+        participant_id=str(normalized.get("participant_id", "") or "").strip() or None,
+        aliases=tuple(decode_aliases(normalized.get("aliases", ""))),
     )

@@ -32,7 +32,10 @@ def main(argv: list[str] | None = None) -> int:
         if str(attendance_source.get("type", "")).casefold() != "xlsx":
             raise ValueError("El piloto actual requiere una fuente Attendance XLSX")
         _, sheets = get_google_services()
-        google_source = ReadOnlyGoogleParticipationSource(sheets, config.google_sheet_id)
+        statuses = raw.get("processing_statuses", {})
+        if not isinstance(statuses, dict):
+            raise ValueError("processing_statuses debe ser un objeto")
+        google_source = ReadOnlyGoogleParticipationSource(sheets, config.google_sheet_id, statuses)
         participants = google_source.participants()
         participant_resolver = build_participant_resolver(participants)
         session_orders = {item.session_id: item.session_order for item in config.session_mapping.values()}
@@ -40,11 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         table = read_xlsx_table(attendance_path, sheet_name=str(attendance_source.get("sheet", "")))
         result = PilotRunner(
             config,
-            PilotSources(google_source.scores, lambda: table, participant_resolver, applicability),
+            PilotSources(google_source.scores, lambda: table, participant_resolver, applicability,
+                         participant_ids=lambda: [item.participant_id for item in participants],
+                         participation_statuses=google_source.statuses),
         ).run()
         report = _aggregate(result)
-        retrospective = _retrospective(raw, args.config, result, participants, attendance_path)
-        report["retrospective"] = retrospective
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     except (OSError, RuntimeError, ValueError, KeyError) as exc:

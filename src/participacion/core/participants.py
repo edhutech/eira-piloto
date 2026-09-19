@@ -195,7 +195,17 @@ def _participant_from_record(record: dict[str, Any], default_source: str) -> Par
         raise ValueError("Un participante requiere nombre")
     aliases = record.get("aliases", [])
     if isinstance(aliases, str):
-        aliases = [item.strip() for item in aliases.split(",") if item.strip()]
+        raw_aliases = aliases.splitlines()
+        if len(raw_aliases) == 1 and "," in raw_aliases[0]:
+            raw_aliases = raw_aliases[0].split(",")
+        aliases = []
+        seen_aliases: set[str] = set()
+        for item in raw_aliases:
+            alias = item.strip()
+            key = strict_name_key(alias)
+            if alias and key not in seen_aliases:
+                aliases.append(alias)
+                seen_aliases.add(key)
     else:
         aliases = [str(item).strip() for item in aliases if str(item).strip()]
     participant_id = str(record.get("participant_id", "")).strip()

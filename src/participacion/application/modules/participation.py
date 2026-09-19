@@ -51,6 +51,7 @@ class ParticipationModule:
         scores: Iterable[ParticipantSessionScore],
         *,
         expected_pairs: Iterable[ParticipantSessionPair] = (),
+        session_statuses: Mapping[str, str] | None = None,
     ) -> ModuleResult:
         issues: list[ModuleIssue] = []
         indexed: dict[tuple[str, int], ParticipantSessionScore] = {}
@@ -98,13 +99,20 @@ class ParticipationModule:
                 issues.append(ModuleIssue(ModuleIssueStatus.NEEDS_REVIEW, "APPLICABILITY_UNKNOWN",
                                           "La aplicabilidad de la sesión es desconocida", participant_id, session_id))
                 continue
-            score = indexed.get((participant_id, session_number))
+            score: ParticipantSessionScore | None = indexed.get((participant_id, session_number))
             provenance = (ObservationProvenance(self.config.source_id, f"session:{session_id}/participant:{participant_id}"),)
             if applicability.status is ApplicabilityStatus.NOT_APPLICABLE:
                 observations.extend(self._observations(participant_id, session_id, None,
                                                        ObservationStatus.NOT_APPLICABLE, provenance))
             elif score is None:
-                if self.config.coverage is SourceCoverage.EXHAUSTIVE:
+                explicit_status = (session_statuses or {}).get(str(session_number), "")
+                if explicit_status == "INCOMPLETE":
+                    observations.extend(self._observations(participant_id, session_id, None,
+                                                           ObservationStatus.INCOMPLETE, provenance))
+                    issues.append(ModuleIssue(ModuleIssueStatus.NEEDS_REVIEW, "SESSION_INCOMPLETE",
+                                              "La sesión tiene estado explícito INCOMPLETE",
+                                              participant_id, session_id))
+                elif self.config.coverage is SourceCoverage.EXHAUSTIVE:
                     observations.extend(self._observations(participant_id, session_id, None,
                                                            ObservationStatus.NO_DATA, provenance))
             else:

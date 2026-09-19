@@ -5,37 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from ....core.participants import Participant, Role, strict_name_key
+from ....application.aliases import decode_aliases, encode_aliases
 from ..retry import execute_with_transient_retry
 from .schema import PARTICIPANT_HEADERS
 
 CANONICAL_PARTICIPANT_HEADERS = PARTICIPANT_HEADERS
 PARTICIPANT_ROLES = {"participant", "facilitator", "other"}
-
-
-def decode_aliases(cell: Any) -> list[str]:
-    """Decode the canonical one-alias-per-line Sheets representation."""
-    aliases: list[str] = []
-    seen: set[str] = set()
-    for value in str(cell or "").splitlines():
-        alias = value.strip()
-        key = strict_name_key(alias)
-        if alias and key not in seen:
-            aliases.append(alias)
-            seen.add(key)
-    return aliases
-
-
-def encode_aliases(aliases: list[str] | None) -> str:
-    """Encode aliases without using comma as a delimiter."""
-    encoded: list[str] = []
-    seen: set[str] = set()
-    for value in aliases or []:
-        alias = str(value).strip()
-        key = strict_name_key(alias)
-        if alias and key not in seen:
-            encoded.append(alias)
-            seen.add(key)
-    return "\n".join(encoded)
 
 
 class SheetsValuesGateway(Protocol):

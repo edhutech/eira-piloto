@@ -51,6 +51,7 @@ class SessionProcessResult:
     participants_created: int = 0
     participants_excluded_by_role: int = 0
     events_excluded_by_role: int = 0
+    external_events_ignored: int = 0
     needs_review: int = 0
     voice_total: int = 0
     voice_valid: int = 0
@@ -82,7 +83,7 @@ class SessionProcessor:
             parsed = self._parse(inspection, warnings)
             transcript_files = tuple(item[0].artifact_id for item in parsed if item[1].artifact_type == "transcript")
             chat_files = tuple(item[0].artifact_id for item in parsed if item[1].artifact_type == "chat")
-            base = dict(session_number=number, transcript_files=transcript_files,
+            base: dict[str, Any] = dict(session_number=number, transcript_files=transcript_files,
                         chat_files=chat_files, warnings=tuple(warnings))
             if not transcript_files or not chat_files:
                 return SessionProcessResult(status=SessionProcessStatus.INCOMPLETE, **base)
@@ -101,9 +102,15 @@ class SessionProcessor:
             resolved_ids: set[str] = set()
             excluded_ids: set[str] = set()
             excluded_events = 0
+            external_events_ignored = 0
             review_messages: list[str] = []
             for event in sorted(human, key=self._event_sort_key):
                 resolution = resolver.resolve_event(event)
+                resolution_status = getattr(resolution.status, "value", resolution.status)
+                if resolution_status == "IGNORED":
+                    if getattr(resolution, "reason", "") != "SYSTEM":
+                        external_events_ignored += 1
+                    continue
                 if resolution.status is ResolutionStatus.NEEDS_REVIEW:
                     review_messages.append(f"Identidad requiere revisión: {event.participant_raw}")
                     continue
@@ -123,6 +130,7 @@ class SessionProcessor:
                 return SessionProcessResult(status=SessionProcessStatus.NEEDS_REVIEW,
                     **base, participants_resolved=len(resolved_ids), needs_review=len(review_messages),
                     participants_excluded_by_role=len(excluded_ids), events_excluded_by_role=excluded_events,
+                    external_events_ignored=external_events_ignored,
                     errors=tuple(review_messages))
 
             if created:
@@ -151,6 +159,7 @@ class SessionProcessor:
             return SessionProcessResult(status=SessionProcessStatus.PROCESSED,
                 **base, participants_resolved=len(resolved_ids), participants_created=len(created),
                 participants_excluded_by_role=len(excluded_ids), events_excluded_by_role=excluded_events,
+                external_events_ignored=external_events_ignored,
                 result_rows=len(scores), changed=status != "NOOP", **metrics)
         except SessionProcessingError as exc:
             errors.append(f"{type(exc).__name__}: {exc}")

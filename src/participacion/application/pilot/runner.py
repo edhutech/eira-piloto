@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from ...application.external_data.mapping import MappingStatus, map_table
 from ...application.external_data.models import TabularTable
 from ...application.modules.attendance import AttendanceConfig, AttendanceInput, AttendanceModule
-from ...application.modules.models import ApplicabilityResolver, ApplicabilityResult, ApplicabilityStatus
+from ...application.modules.models import (ApplicabilityResolver, ApplicabilityResult, ApplicabilityStatus,
+                                            ParticipantSessionPair)
 from ...application.modules.participation import ParticipationConfig, ParticipationModule
 from ...application.modules.resolution import ExternalParticipantResolver, MappingSessionResolver
 from ...core.alerts import AlertLevel
@@ -27,6 +28,8 @@ class PilotSources:
     attendance_table: Callable[[], TabularTable]
     participant_resolver: ExternalParticipantResolver
     applicability_resolver: ApplicabilityResolver | None = None
+    participant_ids: Callable[[], Iterable[str]] | None = None
+    participation_statuses: Callable[[], Mapping[str, str]] | None = None
 
 
 class PilotRunner:
@@ -46,7 +49,17 @@ class PilotRunner:
             applicability,
             ParticipationConfig(f"google_sheets:{self.config.google_sheet_id}", coverage=self.config.participation_coverage),
         )
-        participation_result = participation_module.build_observations(self.sources.participant_scores())
+        participant_ids = tuple(self.sources.participant_ids() if self.sources.participant_ids else ())
+        expected_pairs = tuple(
+            ParticipantSessionPair(participant_id, str(order))
+            for participant_id in participant_ids
+            for _, order in session_order.items()
+        )
+        participation_result = participation_module.build_observations(
+            self.sources.participant_scores(),
+            expected_pairs=expected_pairs,
+            session_statuses=(self.sources.participation_statuses() if self.sources.participation_statuses else {}),
+        )
 
         mapping_result = map_table(self.sources.attendance_table(), self.config.attendance_mapping)
         attendance_resolver = MappingSessionResolver(session_by_external)

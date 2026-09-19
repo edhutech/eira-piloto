@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Mapping
 
 from ...application.modules.resolution import ParticipantResolverAdapter
 from ...core.participants import Participant
@@ -15,6 +15,7 @@ from ..google.sheets.session_results import GoogleSheetsSessionResultsGateway
 class ReadOnlyGoogleParticipationSource:
     sheets_service: Any
     spreadsheet_id: str
+    processing_statuses: Mapping[str, str] | None = None
 
     def participants(self) -> list[Participant]:
         gateway = GoogleSheetsValuesGateway(self.sheets_service, self.spreadsheet_id, "Participantes")
@@ -53,6 +54,9 @@ class ReadOnlyGoogleParticipationSource:
             except (InvalidOperation, ValueError) as exc:
                 raise ValueError(f"Fila {row_number} inválida en Sesiones") from exc
         return result
+
+    def statuses(self) -> Mapping[str, str]:
+        return dict(self.processing_statuses or {})
 
 
 def build_participant_resolver(participants: list[Participant]) -> ParticipantResolverAdapter:

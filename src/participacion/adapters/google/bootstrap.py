@@ -172,7 +172,7 @@ def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict
         "Participantes": [PARTICIPANT_HEADERS] + [[p.get(h, "participant" if h == "role" else "") for h in PARTICIPANT_HEADERS] for p in plan.participants],
         "Ranking": [RANKING_HEADERS],
         "Control": [CONTROL_HEADERS] + [[int(record["session_number"]), record["session_name"],
-                                          record.get("source_ref", record.get("folder_id", "")),
+                                          record.get("state_key", record.get("source_ref", record.get("folder_id", ""))),
                                           "pending", "pending", "pending", "", "Sí"]
                                          for record in session_records],
     }
@@ -224,16 +224,22 @@ def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[
         drive.files().update(fileId=plan.folder_id, body={"name": plan.program_name},
                              fields="id,name", supportsAllDrives=True).execute()
     session_records = []
-    for name, existing_id, should_create in plan.session_folders:
-        folder_id = existing_id
-        if should_create:
-            created = drive.files().create(
-                body={"name": name, "mimeType": FOLDER_MIME, "parents": [plan.folder_id]},
-                fields="id,name,parents", supportsAllDrives=True,
-            ).execute()
-            folder_id = created["id"]
-        session_records.append({"session_number": len(session_records) + 1,
-                               "session_name": name, "source_ref": folder_id or ""})
+    if plan.source_mode == "evidence_sources":
+        session_records = [dict(item) for item in plan.evidence_sessions]
+        for record in session_records:
+            record["state_key"] = record["session_id"]
+    else:
+        for name, existing_id, should_create in plan.session_folders:
+            folder_id = existing_id
+            if should_create:
+                created = drive.files().create(
+                    body={"name": name, "mimeType": FOLDER_MIME, "parents": [plan.folder_id]},
+                    fields="id,name,parents", supportsAllDrives=True,
+                ).execute()
+                folder_id = created["id"]
+            session_records.append({"session_number": len(session_records) + 1,
+                                   "session_name": name, "source_ref": folder_id or "",
+                                   "state_key": folder_id or ""})
     sheet_id = _ensure_sheet(sheets, drive, plan, children, session_records)
     from participacion.adapters.google.sheets.participants import GoogleSheetsValuesGateway, ParticipantRepository
     from participacion.adapters.google.sheets.styling import GoogleSheetStyler
