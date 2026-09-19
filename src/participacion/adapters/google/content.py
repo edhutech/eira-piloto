@@ -30,7 +30,28 @@ def extract_google_doc_text(document: dict[str, Any]) -> str:
             for child in value:
                 visit(child)
 
-    visit(document.get("body", document))
+    tabs = document.get("tabs")
+    if isinstance(tabs, list) and tabs:
+        seen: set[str] = set()
+
+        def visit_tab(tab: Any) -> None:
+            if not isinstance(tab, dict):
+                return
+            tab_id = tab.get("tabProperties", {}).get("tabId")
+            if isinstance(tab_id, str) and tab_id in seen:
+                return
+            if isinstance(tab_id, str):
+                seen.add(tab_id)
+            title = tab.get("tabProperties", {}).get("title", "")
+            parts.append(f"[TAB: {title}]\n")
+            visit(tab.get("documentTab", {}).get("body", {}))
+            for child in tab.get("childTabs", []) or []:
+                visit_tab(child)
+
+        for tab in tabs:
+            visit_tab(tab)
+    else:
+        visit(document.get("body", document))
     return normalize_content("".join(parts))
 
 
@@ -47,7 +68,9 @@ class DriveContentReader:
         if file.media_type == self.DOC_MIME:
             if self.docs is None:
                 raise RuntimeError("Se requiere Google Docs API para leer un documento nativo")
-            document = self.docs.documents().get(documentId=file.artifact_id).execute()
+            document = self.docs.documents().get(
+                documentId=file.artifact_id, includeTabsContent=True
+            ).execute()
             text = extract_google_doc_text(document)
             return ContentArtifact(file, text, "text", content_hash(text))
 
