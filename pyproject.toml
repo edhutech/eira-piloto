@@ -38,6 +38,7 @@ dev = ["build>=1.0", "ruff>=0.6", "mypy>=1.11"]
 participacion-sync = "participacion.cli.main:main"
 participacion-init = "participacion.cli.init:main"
 participacion-google-auth = "participacion.cli.google_auth:main"
+eira-pilot = "participacion.cli.pilot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

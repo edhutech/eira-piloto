@@ -1,0 +1,58 @@
+{
+  "program": {
+    "program_id": "replace-with-program-id",
+    "program_name": "replace-with-program-name",
+    "sheet_id": "replace-with-google-sheet-id"
+  },
+  "participation": {
+    "source_id": "google_sheets:replace-with-google-sheet-id",
+    "coverage": "UNKNOWN"
+  },
+  "attendance": {
+    "source": {
+      "type": "xlsx",
+      "file": "path/to/attendance.xlsx",
+      "sheet": "participants"
+    },
+    "mapping": {
+      "participant_external_id": {
+        "column": "external_participant_id",
+        "type": "string",
+        "required": true
+      },
+      "session_external_id": {
+        "column": "class_date",
+        "type": "string",
+        "required": true
+      },
+      "metrics": {
+        "attendance_metric_a": {
+          "column": "attendance_value_a",
+          "type": "number"
+        },
+        "attendance_metric_b": {
+          "column": "attendance_value_b",
+          "type": "number"
+        }
+      }
+    },
+    "coverage": "UNKNOWN"
+  },
+  "session_mapping_file": "session_mapping.example.json",
+  "longitudinal": {
+    "minimum_observations": 1,
+    "recent_window_size": 1,
+    "trend_threshold": 0
+  },
+  "signals": {
+    "version": "pilot.v1",
+    "participation_silence_streak": {
+      "enabled": true,
+      "minimum_streak": 2
+    }
+  },
+  "alerts": {
+    "version": "pilot.v1",
+    "silence_level": "OBSERVAR"
+  }
+}

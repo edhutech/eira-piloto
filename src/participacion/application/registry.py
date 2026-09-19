@@ -4,9 +4,9 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, cast
 
-from ..core.models import ProgramRecord, ProviderRef, SessionRecord
+from ..core.models import EvidenceSourceRef, ProgramRecord, ProviderRef, SessionRecord
 
 DEFAULT_PROGRAMS_PATH = Path(os.environ.get(
     "PARTICIPACION_CONFIG_DIR", Path.home() / ".config" / "participacion"
@@ -49,11 +49,36 @@ def _provider(value: Any, field: str, supported: set[str]) -> ProviderRef:
 
 def _session(value: Mapping[str, Any]) -> SessionRecord:
     number = _positive_integer(value.get("session_number"), "session_number")
-    return SessionRecord(
-        session_number=number,
-        session_name=str(value["session_name"]),
-        source_ref=str(value.get("source_ref", value.get("folder_id", ""))),
-    )
+    source_ref = str(value.get("source_ref", value.get("folder_id", "")) or "").strip()
+    has_sources = "evidence_sources" in value
+    raw_sources = value.get("evidence_sources", ())
+    if raw_sources is None:
+        raw_sources = ()
+    if has_sources and not isinstance(raw_sources, list):
+        raise ValueError("INVALID: evidence_sources debe ser una lista")
+    if not has_sources:
+        raw_sources = []
+    if source_ref and has_sources:
+        raise ValueError("INVALID: una sesión no puede declarar source_ref y evidence_sources")
+    if not source_ref and (not has_sources or not raw_sources):
+        raise ValueError("INVALID: una sesión requiere exactamente source_ref o evidence_sources")
+    sources: list[EvidenceSourceRef] = []
+    for raw in raw_sources:
+        if not isinstance(raw, Mapping):
+            raise ValueError("INVALID: cada evidence_source debe ser un objeto")
+        provider = _required_text(raw.get("provider"), "evidence_sources.provider")
+        kind = _required_text(raw.get("kind"), "evidence_sources.kind")
+        ref = _required_text(raw.get("ref"), "evidence_sources.ref")
+        evidence_type = raw.get("evidence_type")
+        if evidence_type not in {"transcript", "chat"}:
+            raise ValueError("INVALID: evidence_sources.evidence_type es obligatorio y debe ser transcript o chat")
+        if kind not in {"container", "artifact"}:
+            raise ValueError(f"INVALID: kind no soportado: {kind}")
+        sources.append(EvidenceSourceRef(provider, cast(Literal["container", "artifact"], kind), ref, evidence_type))
+    session_id = str(value.get("session_id", "") or "").strip()
+    if raw_sources and not session_id:
+        raise ValueError("INVALID: una sesión nueva requiere session_id explícito")
+    return SessionRecord(number, str(value["session_name"]), source_ref, session_id, tuple(sources))
 
 
 def _program(value: Mapping[str, Any]) -> ProgramRecord:
@@ -65,8 +90,8 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
     sessions = tuple(sorted((_session(item) for item in raw_sessions), key=lambda item: item.session_number))
     if len({session.session_number for session in sessions}) != len(sessions):
         raise ValueError("session_number debe ser único")
-    if any(not session.source_ref.strip() for session in sessions):
-        raise ValueError("Cada sesión requiere source_ref")
+    if any(not (session.source_ref or session.evidence_sources) for session in sessions):
+        raise ValueError("Cada sesión requiere una fuente de evidencia")
     program_id = _required_text(value.get("program_id", value.get("folder_id")), "program_id")
     participant_mode = _required_text(value.get("participant_mode"), "participant_mode")
     if participant_mode not in PARTICIPANT_MODES:
@@ -114,11 +139,24 @@ def _encode_program(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any
         source["metadata"] = dict(program.source.metadata)
     if program.output.metadata is not None:
         output["metadata"] = dict(program.output.metadata)
+    encoded_sessions = []
+    for session in program.sessions:
+        item = {"session_number": session.session_number, "session_name": session.session_name}
+        if session.source_ref:
+            item["source_ref"] = session.source_ref
+        if session.session_id:
+            item["session_id"] = session.session_id
+        if session.evidence_sources:
+            item["evidence_sources"] = [
+                {"provider": source.provider, "kind": source.kind, "ref": source.ref,
+                 "evidence_type": source.evidence_type}
+                for source in session.evidence_sources
+            ]
+        encoded_sessions.append(item)
     return {"program_id": program.program_id, "program_name": program.program_name,
             "session_count": program.session_count, "participant_mode": program.participant_mode,
             "source": source, "output": output,
-            "sessions": [{"session_number": s.session_number, "session_name": s.session_name,
-                          "source_ref": s.source_ref} for s in program.sessions]}
+            "sessions": encoded_sessions}
 
 
 def save_programs(path: Path, programs: Mapping[str, ProgramRecord | Mapping[str, Any]]) -> None:

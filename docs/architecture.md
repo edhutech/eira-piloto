@@ -40,3 +40,19 @@ The registry accepts legacy bare maps and canonical version 1 documents:
 
 Legacy reads are never rewritten automatically. Explicit initialization saves
 the canonical format atomically.
+
+External structured-data ingestion is kept outside Core. Application owns the
+neutral ingestion contracts, mapping, validation, and `CanonicalFact`; tabular
+adapters own CSV/XLSX reading. A source-specific JSON configuration selects
+physical columns and produces facts identified by external participant and
+session references. These facts are transformed into Eira Observations only by
+semantic modules. The read-only `eira-pilot` composition consumes persisted
+Participation results and mapped structured facts without changing
+`participacion-sync`.
+
+The pilot generates one historical snapshot per ordered session. Each snapshot
+uses only observations available through its `as_of_session`; future sessions
+cannot affect its baseline, recent window, trend, streak, Signal, or Alert.
+`RetrospectiveEvaluator` is a separate application component: it compares those
+snapshots with normalized outcomes after generation. Outcomes never enter the
+SignalEngine or AlertEngine.

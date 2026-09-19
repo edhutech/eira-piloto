@@ -2,7 +2,8 @@ import unittest
 
 from participacion.core.participants import Participant
 from participacion.application.roster import (RosterAction, RosterImporter, RosterRecord,
-                              _stable_official_id)
+                              _stable_official_id, roster_records_from_rows,
+                              roster_records_to_participants)
 
 
 class FakeParticipantRepository:
@@ -23,6 +24,24 @@ class FakeParticipantRepository:
 
 
 class RosterTests(unittest.TestCase):
+    def test_explicit_participant_id_is_preserved_in_import_records(self):
+        records = roster_records_from_rows([
+            ["participant_id", "nombre", "correo", "role"],
+            ["basf_p_1", "Ana", "ana@example.com", "participant"],
+        ])
+        self.assertEqual(roster_records_to_participants(records, "test")[0]["participant_id"], "basf_p_1")
+
+    def test_explicit_participant_ids_must_be_complete_and_unique(self):
+        with self.assertRaises(ValueError):
+            roster_records_from_rows([["participant_id", "nombre", "correo"], ["", "Ana", "a@example.com"]])
+        with self.assertRaises(ValueError):
+            roster_records_from_rows([["participant_id", "nombre", "correo"],
+                                      ["p1", "Ana", "a@example.com"], ["p1", "Bea", "b@example.com"]])
+
+    def test_old_roster_without_participant_id_keeps_current_behavior(self):
+        records = roster_records_from_rows([["nombre", "correo"], ["Ana", "a@example.com"]])
+        self.assertEqual(roster_records_to_participants(records, "test")[0]["participant_id"], "")
+
     def test_email_then_name_then_alias_and_stable_new_id(self):
         repo = FakeParticipantRepository([Participant("p1", "Ana", "ana@example.com", ["Anita"])])
         importer = RosterImporter(repo)

@@ -18,3 +18,9 @@ build/
 google_token.json
 client_secret*.json
 credentials*.json
+
+# Local pilot configuration and results
+configs/local/
+pilot-results/
+data/
+*.pilot.json

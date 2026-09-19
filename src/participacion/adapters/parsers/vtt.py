@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import re
 
-from ...core.models import SourceArtifact, NormalizedEvent
-from .base import ParseResult, classify_participant_label, result, text_content, timestamp_seconds
+from ...core.models import EvidenceContext, SourceArtifact, NormalizedEvent
+from .base import ParseResult, classify_participant_label, parse_semantics, result, text_content, timestamp_seconds
 
 
 class VttParser:
     def can_parse(self, file_metadata: SourceArtifact) -> bool:
         return file_metadata.name.casefold().endswith(".vtt")
 
-    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int) -> ParseResult:
+    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int,
+              evidence_context: EvidenceContext | None = None) -> ParseResult:
+        evidence_type, channel = parse_semantics(evidence_context, "transcript", "voice")
         blocks = re.split(r"\n\s*\n", text_content(content).replace("\r\n", "\n"))
         events: list[NormalizedEvent] = []
         timing = re.compile(r"^(\d{2}:\d{2}:\d{2}[\.,]\d{3})\s+-->\s+")
@@ -36,5 +38,5 @@ class VttParser:
                 continue
             locator = f"block:{block_number}"
             identity_type, base_label = classify_participant_label(speaker)
-            events.append(NormalizedEvent(session_number, speaker, "voice", match.group(1), timestamp_seconds(match.group(1)), raw, raw, file_metadata.artifact_id, locator, __import__("hashlib").sha256("\x1f".join((file_metadata.artifact_id, locator, speaker, raw)).encode()).hexdigest(), identity_type, base_label))
-        return result("vtt", "transcript", "voice", events)
+            events.append(NormalizedEvent(session_number, speaker, channel, match.group(1), timestamp_seconds(match.group(1)), raw, raw, file_metadata.artifact_id, locator, __import__("hashlib").sha256("\x1f".join((file_metadata.artifact_id, locator, speaker, raw)).encode()).hexdigest(), identity_type, base_label))
+        return result("vtt", evidence_type, channel, events)

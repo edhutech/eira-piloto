@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from ...core.models import SourceArtifact, FileChange, FileStatus, ProgramInspection, ProgramRecord, SessionInspection
+from ...core.models import (EvidenceContext, EvidenceSourceRef, ResolvedEvidence, SourceArtifact, FileChange, FileStatus,
+                             ProgramInspection, ProgramRecord, SessionInspection)
+from ...application.ports.evidence import EvidenceResolver
 from ...application.registry import select_programs
 from ..filesystem.state import file_fingerprint
 
 DRIVE_FILE_FIELDS = "files(id,name,mimeType,modifiedTime,size,md5Checksum,webViewLink)"
+DRIVE_ARTIFACT_FIELDS = "id,name,mimeType,modifiedTime,size,md5Checksum,webViewLink"
 
 
 def list_session_files(drive: Any, folder_id: str) -> list[SourceArtifact]:
@@ -18,6 +21,47 @@ def list_session_files(drive: Any, folder_id: str) -> list[SourceArtifact]:
         includeItemsFromAllDrives=True,
     ).execute()
     return [_artifact_from_api(item) for item in response.get("files", [])]
+
+
+def get_file(drive: Any, file_id: str) -> SourceArtifact:
+    item = drive.files().get(
+        fileId=file_id,
+        fields=DRIVE_ARTIFACT_FIELDS,
+        supportsAllDrives=True,
+    ).execute()
+    return _artifact_from_api(item)
+
+
+class GoogleDriveEvidenceResolver(EvidenceResolver):
+    def __init__(self, drive: Any):
+        self.drive = drive
+
+    def resolve(self, sources: tuple[EvidenceSourceRef, ...]) -> list[ResolvedEvidence]:
+        return resolve_evidence_sources_with_context(self.drive, sources)
+
+
+def resolve_evidence_sources(drive: Any, sources: tuple[EvidenceSourceRef, ...]) -> list[SourceArtifact]:
+    return [item.artifact for item in resolve_evidence_sources_with_context(drive, sources)]
+
+
+def resolve_evidence_sources_with_context(drive: Any, sources: tuple[EvidenceSourceRef, ...]) -> list[ResolvedEvidence]:
+    artifacts: list[ResolvedEvidence] = []
+    contexts: dict[str, EvidenceContext | None] = {}
+    for source in sources:
+        if source.provider != "google_drive":
+            raise ValueError(f"Proveedor de evidencia no soportado: {source.provider}")
+        resolved = (list_session_files(drive, source.ref)
+                    if source.kind == "container" else [get_file(drive, source.ref)])
+        for artifact in resolved:
+            context = (EvidenceContext(source.evidence_type)
+                       if source.evidence_type is not None else None)
+            previous = contexts.get(artifact.artifact_id, ...)
+            if previous is not ... and previous != context:
+                raise ValueError(f"INVALID: conflicto de evidence_type para artifact_id {artifact.artifact_id}")
+            if previous is ...:
+                contexts[artifact.artifact_id] = context
+                artifacts.append(ResolvedEvidence(artifact, context))
+    return artifacts
 
 
 def _artifact_from_api(value: dict[str, Any]) -> SourceArtifact:
@@ -51,9 +95,17 @@ def classify_changes(files: Iterable[SourceArtifact], previous: dict[str, str]) 
 def inspect_program(drive: Any, program: ProgramRecord, state: dict[str, Any], program_id: str) -> ProgramInspection:
     inspections = []
     for session in program.sessions:
-        files = list_session_files(drive, session.folder_id)
-        previous = _stored_files(state, program_id, session.folder_id)
-        inspections.append(SessionInspection(session=session, files=files, changes=classify_changes(files, previous)))
+        sources = session.evidence_sources or (EvidenceSourceRef("google_drive", "container", session.source_ref),)
+        resolved = (resolve_evidence_sources_with_context(drive, sources)
+                    if session.evidence_sources else
+                    [ResolvedEvidence(item, None) for item in resolve_evidence_sources(drive, sources)])
+        files = [item.artifact for item in resolved]
+        evidence_contexts = {item.artifact.artifact_id: item.evidence_context
+                             for item in resolved if item.evidence_context is not None}
+        previous = _stored_files(state, program_id, session.state_key)
+        inspections.append(SessionInspection(session=session, files=files,
+                                             changes=classify_changes(files, previous),
+                                             evidence_contexts=evidence_contexts))
     return ProgramInspection(program=program, sessions=inspections)
 
 

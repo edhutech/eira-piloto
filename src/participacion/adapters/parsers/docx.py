@@ -5,17 +5,19 @@ import zipfile
 from dataclasses import replace
 from xml.etree import ElementTree as ET
 
-from ...core.models import DiscardedDocumentEvent, SourceArtifact
-from .base import ParseResult, result, speaker_events
+from ...core.models import DiscardedDocumentEvent, EvidenceContext, SourceArtifact
+from .base import ParseResult, parse_semantics, result, speaker_events
 
 
 class DocxParser:
     def can_parse(self, file_metadata: SourceArtifact) -> bool:
         return file_metadata.name.casefold().endswith(".docx")
 
-    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int) -> ParseResult:
+    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int,
+              evidence_context: EvidenceContext | None = None) -> ParseResult:
+        evidence_type, channel = parse_semantics(evidence_context, "transcript", "voice")
         if not isinstance(content, bytes):
-            return ParseResult(False, "transcript", "voice", [], "docx", [],
+            return ParseResult(False, evidence_type, channel, [], "docx", [],
                                ["DOCX requiere contenido binario"])
         try:
             with zipfile.ZipFile(__import__("io").BytesIO(content)) as archive:
@@ -41,7 +43,7 @@ class DocxParser:
                     paragraphs.append("")
                 else:
                     paragraphs.append(text)
-            events = speaker_events("\n".join(paragraphs), file_metadata.artifact_id, session_number, "voice")
-            return replace(result("docx", "transcript", "voice", events), discarded_document_events=discarded)
+            events = speaker_events("\n".join(paragraphs), file_metadata.artifact_id, session_number, channel)
+            return replace(result("docx", evidence_type, channel, events), discarded_document_events=discarded)
         except (KeyError, ET.ParseError, zipfile.BadZipFile) as exc:
-            return result("docx", "transcript", "voice", [], error=f"DOCX inválido: {exc}")
+            return result("docx", evidence_type, channel, [], error=f"DOCX inválido: {exc}")

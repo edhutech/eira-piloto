@@ -99,7 +99,7 @@ class ProgramRunner:
         warnings: list[str] = []
         errors: list[str] = []
         for session_inspection in sorted(inspection.sessions, key=lambda item: item.session.session_number):
-            session_id = session_inspection.session.folder_id
+            session_id = session_inspection.session.state_key
             previous = sessions_state.get(session_id, {})
             decision = self._decision(session_inspection, previous)
             if not decision.process:
@@ -137,8 +137,8 @@ class ProgramRunner:
             try:
                 tracking_result = dependencies.tracking_repository.refresh(
                     program.sessions,
-                    {session.session_number: sessions_state[session.folder_id]["status"]
-                     for session in program.sessions if session.folder_id in sessions_state},
+                    {session.session_number: sessions_state[session.state_key]["status"]
+                     for session in program.sessions if session.state_key in sessions_state},
                 )
                 tracking_changed = str(getattr(tracking_result, "status", "REPLACE")) != "NOOP"
             except (OSError, RuntimeError, ValueError) as exc:
@@ -147,8 +147,8 @@ class ProgramRunner:
         addon_results: list[AddonResult] = []
         events: list[ApplicationEvent] = []
         session_statuses = {
-            session.session_number: sessions_state[session.source_ref]["status"]
-            for session in program.sessions if session.source_ref in sessions_state
+            session.session_number: sessions_state[session.state_key]["status"]
+            for session in program.sessions if session.state_key in sessions_state
         }
         for addon in dependencies.addons:
             try:
@@ -217,7 +217,7 @@ class ProgramRunner:
         return {
             "session_number": inspection.session.session_number,
             "session_name": inspection.session.session_name,
-            "folder_id": inspection.session.folder_id,
+            "folder_id": inspection.session.state_key,
             "status": status,
             "processing_version": PROCESSING_PIPELINE_VERSION,
             "files": dict(fingerprints),

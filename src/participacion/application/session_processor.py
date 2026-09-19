@@ -171,11 +171,17 @@ class SessionProcessor:
                 self.content_loader.read if hasattr(self.content_loader, "read") else self.content_loader,
                 file, label="lectura de contenido")
             content = getattr(loaded, "content", loaded)
+            evidence_context = inspection.evidence_contexts.get(file.artifact_id)
+            parse_kwargs = ({"evidence_context": evidence_context}
+                            if evidence_context is not None else {})
             result = self._operational_call(parser.parse, file, content,
                                             inspection.session.session_number,
-                                            label="parseo de artefacto")
+                                            label="parseo de artefacto", **parse_kwargs)
             warnings.extend(result.warnings)
-            if result.valid and result.artifact_type in {"transcript", "chat"}:
+            expected_type = (evidence_context.evidence_type
+                             if evidence_context is not None else result.artifact_type)
+            if (result.valid and result.artifact_type == expected_type
+                    and result.channel == ("voice" if expected_type == "transcript" else "chat")):
                 parsed.append((file, result))
             else:
                 warnings.extend(result.errors)

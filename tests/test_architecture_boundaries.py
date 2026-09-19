@@ -57,6 +57,22 @@ class ArchitectureBoundaryTests(unittest.TestCase):
                     self.assertNotIn("src", (module or "").split("."), path)
                     self.assertTrue(all(not name.startswith("src.") for name in names), path)
 
+    def test_new_pipeline_layers_keep_provider_boundaries(self):
+        application_root = ROOT / "application"
+        for path in (application_root / "modules").glob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("adapters", text, path)
+            self.assertNotIn("BASF", text, path)
+            self.assertNotIn("gOS_", text, path)
+        for path in (application_root / "signal_engine.py", application_root / "alert_engine.py"):
+            text = path.read_text(encoding="utf-8")
+            for forbidden in ("openpyxl", "import csv", "Google", "BASF", "CanonicalFact"):
+                self.assertNotIn(forbidden, text, path)
+        for path in (ROOT / "core" / "signals.py", ROOT / "core" / "alerts.py"):
+            text = path.read_text(encoding="utf-8")
+            for forbidden in ("application", "adapters", "CanonicalFact", "BASF"):
+                self.assertNotIn(forbidden, text, path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 
 from participacion.adapters.google.content import ContentArtifact, content_hash, extract_google_doc_text
-from participacion.core.models import SourceArtifact
+from participacion.core.models import EvidenceContext, SourceArtifact
 from participacion.adapters.parsers.docx import DocxParser
 from participacion.adapters.parsers.google_docs import GoogleDocsParser
 from participacion.adapters.parsers.sbv import SbvParser
@@ -51,6 +51,45 @@ class ContentAndParserTests(unittest.TestCase):
     def test_txt_requires_two_structured_events(self):
         result = TxtParser().parse(file_meta("one.txt"), "Alice: Una intervención\n", 1)
         self.assertFalse(result.valid)
+
+    def test_txt_parser_accepts_legacy_extension(self):
+        self.assertTrue(TxtParser().can_parse(file_meta("transcript.txt")))
+
+    def test_txt_parser_accepts_text_plain_without_extension(self):
+        self.assertTrue(TxtParser().can_parse(file_meta("chat-export", "text/plain")))
+
+    def test_txt_parser_rejects_other_media_type_without_extension(self):
+        self.assertFalse(TxtParser().can_parse(file_meta("chat-export", "application/octet-stream")))
+
+    def test_txt_parser_parsing_is_unchanged_for_text_plain(self):
+        parser = TxtParser()
+        result = parser.parse(
+            file_meta("chat-export", "text/plain"),
+            "Alice: Primera intervención\nBob: Segunda intervención\n",
+            1,
+        )
+        self.assertTrue(result.valid)
+        self.assertEqual(result.artifact_type, "transcript")
+        self.assertEqual(result.channel, "voice")
+        self.assertEqual(len(result.events), 2)
+
+    def test_explicit_context_controls_txt_semantics(self):
+        parser = TxtParser()
+        result = parser.parse(
+            file_meta("chat-export", "text/plain"),
+            "Alice: Primera intervención\nBob: Segunda intervención\n",
+            1, EvidenceContext("chat"),
+        )
+        self.assertEqual((result.artifact_type, result.channel), ("chat", "chat"))
+        self.assertTrue(all(event.channel == "chat" for event in result.events))
+
+    def test_evidence_context_channel_mapping_is_deterministic(self):
+        parser = TxtParser()
+        content = "Alice: Primera intervención\nBob: Segunda intervención\n"
+        self.assertEqual(parser.parse(file_meta("x.txt"), content, 1,
+                                      EvidenceContext("transcript")).channel, "voice")
+        self.assertEqual(parser.parse(file_meta("x.txt"), content, 1,
+                                      EvidenceContext("chat")).channel, "chat")
 
     def test_speaker_parser_rejects_numeric_labels(self):
         result = GoogleDocsParser().parse(

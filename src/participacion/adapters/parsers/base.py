@@ -5,7 +5,8 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from ...core.models import DiscardedDocumentEvent, SourceArtifact, NormalizedEvent
+from ...core.models import (Channel, DiscardedDocumentEvent, EvidenceContext, EvidenceType,
+                            SourceArtifact, NormalizedEvent, channel_for_evidence_type)
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,8 @@ class ParseResult:
 
 class Parser(Protocol):
     def can_parse(self, file_metadata: SourceArtifact) -> bool: ...
-    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int) -> ParseResult: ...
+    def parse(self, file_metadata: SourceArtifact, content: str | bytes, session_number: int,
+              evidence_context: EvidenceContext | None = None) -> ParseResult: ...
 
 
 TIME_PATTERN = r"(?:\d+:)?\d{1,2}:\d{2}(?:[\.,]\d{1,3})?"
@@ -101,7 +103,14 @@ def speaker_events(text: str, artifact_id: str, session_number: int, channel: Li
     return events
 
 
-def result(parser_name: str, artifact_type: Literal["transcript", "chat"], channel: Literal["voice", "chat"], events: list[NormalizedEvent], minimum_events: int = 1, error: str = "") -> ParseResult:
+def parse_semantics(evidence_context: EvidenceContext | None, legacy_type: EvidenceType,
+                    legacy_channel: Channel) -> tuple[EvidenceType, Channel]:
+    if evidence_context is None:
+        return legacy_type, legacy_channel
+    return evidence_context.evidence_type, channel_for_evidence_type(evidence_context.evidence_type)
+
+
+def result(parser_name: str, artifact_type: EvidenceType, channel: Channel, events: list[NormalizedEvent], minimum_events: int = 1, error: str = "") -> ParseResult:
     valid = len(events) >= minimum_events
     return ParseResult(valid, artifact_type if valid else None, channel if valid else None, events if valid else [], parser_name, [], [] if valid else [error or "Estructura compatible insuficiente"])
 

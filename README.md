@@ -83,6 +83,23 @@ All commands support `--help` without making Google calls. Google operations
 require `participacion-agent[google]`; XLSX roster input requires
 `participacion-agent[xlsx]`.
 
+## Eira pilot
+
+The experimental pilot is a separate, read-only composition over the existing
+Participation results and a configured structured source:
+
+    eira-pilot --config configs/local/pilot.json --dry-run
+
+It reads persisted Participation results after `participacion-sync`, imports
+the configured XLSX/CSV source through the generic reader and mapping, builds
+Observations, historical as-of-session snapshots, deterministic Signals, and
+Alerts. It does not modify Google Sheets and it does not invoke the existing
+sync runner. Use `configs/pilot.example.json` and
+`configs/session_mapping.example.json` as client-neutral templates. Real paths,
+Google IDs, mappings, source files, outcomes, and pilot results belong under
+ignored local paths. `BAJAS` is used only by the separate retrospective
+evaluation and never generates a Signal or Alert.
+
 ## Configuration and state
 
 - `PARTICIPACION_CONFIG_DIR` — default `~/.config/participacion`.

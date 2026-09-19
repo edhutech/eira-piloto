@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping
-from typing import Literal
+from typing import Any, Literal, Mapping
+
+EvidenceType = Literal["transcript", "chat"]
+Channel = Literal["voice", "chat"]
+
+
+@dataclass(frozen=True)
+class EvidenceContext:
+    evidence_type: EvidenceType
+
+
+def channel_for_evidence_type(evidence_type: EvidenceType) -> Channel:
+    return "voice" if evidence_type == "transcript" else "chat"
 
 
 class FileStatus(str, Enum):
@@ -43,15 +54,30 @@ class ProviderRef:
 
 
 @dataclass(frozen=True)
+class EvidenceSourceRef:
+    provider: str
+    kind: Literal["container", "artifact"]
+    ref: str
+    evidence_type: EvidenceType | None = None
+
+
+@dataclass(frozen=True)
 class SessionRecord:
     session_number: int
     session_name: str
-    source_ref: str
+    source_ref: str = ""
+    session_id: str = ""
+    evidence_sources: tuple[EvidenceSourceRef, ...] = ()
 
     @property
     def folder_id(self) -> str:
         """Legacy state key; the application treats this as source_ref."""
         return self.source_ref
+
+    @property
+    def state_key(self) -> str:
+        """Stable state key while preserving legacy source_ref keys."""
+        return self.source_ref or self.session_id
 
 
 @dataclass(frozen=True)
@@ -88,6 +114,13 @@ class SourceArtifact:
     locator: str | None = None
     metadata: Mapping[str, Any] | None = None
 
+
+@dataclass(frozen=True)
+class ResolvedEvidence:
+    artifact: SourceArtifact
+    evidence_context: EvidenceContext | None = None
+
+
 @dataclass(frozen=True)
 class ContentArtifact:
     artifact: SourceArtifact
@@ -116,6 +149,7 @@ class SessionInspection:
     session: SessionRecord
     files: list[SourceArtifact] = field(default_factory=list)
     changes: list[FileChange] = field(default_factory=list)
+    evidence_contexts: dict[str, EvidenceContext] = field(default_factory=dict)
 
     @property
     def requires_processing(self) -> bool:

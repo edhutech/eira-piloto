@@ -17,6 +17,7 @@ class RosterRecord:
     enrollment_status: str = "active"
     start_session: int = 1
     end_session: int | None = None
+    participant_id: str | None = None
 
 
 class RosterAction(str):
@@ -166,7 +167,17 @@ def roster_records_from_rows(rows: Sequence[Sequence[Any]]) -> list[RosterRecord
         return []
     headers = [str(value or "").strip() for value in rows[0]]
     roster_header_positions(headers)
-    return [_record_from_mapping(dict(zip(headers, row))) for row in rows[1:] if any(row)]
+    has_participant_id = "participant_id" in {
+        header.strip().casefold().replace(" ", "_") for header in headers
+    }
+    records = [_record_from_mapping(dict(zip(headers, row))) for row in rows[1:] if any(row)]
+    if has_participant_id:
+        ids = [record.participant_id for record in records]
+        if any(not value or not str(value).strip() for value in ids):
+            raise ValueError("participant_id no puede estar vacío cuando la columna existe")
+        if len(set(ids)) != len(ids):
+            raise ValueError("participant_id duplicado dentro del roster")
+    return records
 
 
 def roster_header_positions(headers: Sequence[Any]) -> dict[str, int]:
@@ -185,8 +196,8 @@ def roster_header_positions(headers: Sequence[Any]) -> dict[str, int]:
 def roster_records_to_participants(records: Iterable[RosterRecord], source: str) -> list[dict[str, str]]:
     """Adapt canonical roster records to the initialization sheet contract."""
     return [{
-        "participant_id": "", "nombre": record.nombre, "correo": record.correo,
-        "aliases": "", "role": "participant", "source": source, "status": "new",
+        "participant_id": record.participant_id or "", "nombre": record.nombre, "correo": record.correo,
+        "aliases": "", "role": record.role or "participant", "source": source, "status": "new",
         "enrollment_status": record.enrollment_status,
         "start_session": str(record.start_session),
         "end_session": "" if record.end_session is None else str(record.end_session),
@@ -206,4 +217,5 @@ def _record_from_mapping(row: Mapping[str, Any]) -> RosterRecord:
         str(normalized.get("enrollment_status", "active") or "active").strip(),
         int(float(normalized.get("start_session", 1) or 1)),
         None if str(end or "").strip() == "" else int(float(end)),
+        str(normalized.get("participant_id", "") or "").strip() or None,
     )

@@ -4,11 +4,16 @@ from __future__ import annotations
 from typing import Any, Protocol, Sequence
 
 from ...core.models import ParticipantSnapshot, SourceArtifact
+from ..external_data.models import TabularTable
 from ...core.scoring import ParticipantSessionScore
 
 
 class ContentReader(Protocol):
     def read(self, artifact: SourceArtifact) -> Any: ...
+
+
+class TabularReader(Protocol):
+    def read(self, source: str, **options: Any) -> TabularTable: ...
 
 
 class StateStore(Protocol):
