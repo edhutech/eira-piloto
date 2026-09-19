@@ -103,6 +103,88 @@ def speaker_events(text: str, artifact_id: str, session_number: int, channel: Li
     return events
 
 
+def embedded_transcript_section(text: str) -> tuple[bool, str]:
+    """Return the Meet transcript section, if the document explicitly has one."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    marker = next((index for index, line in enumerate(lines)
+                   if line.strip() == "📖 Transcripción"), None)
+    if marker is None:
+        return False, text
+    selected: list[str] = []
+    for line in lines[marker + 1:]:
+        if line.strip().casefold().startswith("la transcripción finalizó"):
+            break
+        selected.append(line)
+    return True, "\n".join(selected)
+
+
+def embedded_speaker_events(text: str, artifact_id: str, session_number: int,
+                            channel: Literal["voice", "chat"]) -> list[NormalizedEvent]:
+    """Parse timestamp blocks in a confirmed embedded Meet transcript."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    marker = next((index for index, line in enumerate(lines)
+                   if line.strip() == "📖 Transcripción"), None)
+    if marker is None:
+        return []
+    current_timestamp: str | None = None
+    current: dict[str, Any] | None = None
+    events: list[NormalizedEvent] = []
+
+    def emit(value: dict[str, Any]) -> None:
+        raw = clean_text("\n".join(value.pop("parts")))
+        value["raw_text"] = raw
+        value["text"] = raw
+        value["identity_type"], value["participant_base_raw"] = classify_participant_label(value["participant_raw"])
+        value["event_id"] = event_id(value["source_artifact_id"], value["source_locator"], value["participant_raw"], raw)
+        events.append(NormalizedEvent(**value))
+
+    for line_number, line in enumerate(lines[marker + 1:], marker + 2):
+        stripped = line.strip()
+        if stripped.casefold().startswith("la transcripción finalizó"):
+            break
+        if not stripped:
+            continue
+        if re.fullmatch(TIME_PATTERN, stripped):
+            if current:
+                emit(current)
+                current = None
+            current_timestamp = stripped
+            continue
+        if current_timestamp is None:
+            continue
+        match = re.match(r"^(?P<speaker>[^:\n]{1,80}):\s*(?P<text>.*)$", stripped)
+        if match and _looks_like_speaker_label(match.group("speaker")):
+            if current:
+                emit(current)
+            speaker = match.group("speaker").strip()
+            current = {
+                "session_number": session_number,
+                "participant_raw": speaker,
+                "channel": channel,
+                "timestamp_raw": current_timestamp,
+                "timestamp_seconds": timestamp_seconds(current_timestamp),
+                "raw_text": "",
+                "text": "",
+                "source_artifact_id": artifact_id,
+                "source_locator": f"line:{line_number}",
+                "parts": [match.group("text")],
+            }
+        elif current:
+            current["parts"].append(stripped)
+    if current:
+        emit(current)
+    return events
+
+
+def _looks_like_speaker_label(value: str) -> bool:
+    """Accept display-name-shaped labels, not arbitrary message prefixes."""
+    label = value.strip()
+    if re.fullmatch(PRESENTATION_LABEL, label):
+        return True
+    tokens = [token for token in re.split(r"\s+", label) if token]
+    return len(tokens) >= 2 and all(re.fullmatch(r"[\wÀ-ÿ'’.-]+", token, re.UNICODE) for token in tokens)
+
+
 def parse_semantics(evidence_context: EvidenceContext | None, legacy_type: EvidenceType,
                     legacy_channel: Channel) -> tuple[EvidenceType, Channel]:
     if evidence_context is None:
