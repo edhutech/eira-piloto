@@ -2,10 +2,31 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .modules.resolution import KnownExternalIdentity
 from ..core.participants import strict_name_key
+
+
+def known_external_from_rows(
+    rows: Iterable[Mapping[str, object]],
+) -> Mapping[str, KnownExternalIdentity]:
+    result: dict[str, KnownExternalIdentity] = {}
+    for row_number, row in enumerate(rows, start=2):
+        observed = str(row.get("observed_name", "") or "").strip()
+        reason = str(row.get("reason", "") or "").strip()
+        provenance = str(row.get("provenance", "") or "").strip()
+        if not observed:
+            raise ValueError(f"known_external observed_name vacío en fila {row_number}")
+        if not reason or not provenance:
+            raise ValueError(f"known_external requiere reason y provenance en fila {row_number}")
+        key = strict_name_key(observed)
+        identity = KnownExternalIdentity(observed, reason, provenance)
+        previous = result.get(key)
+        if previous is not None and previous != identity:
+            raise ValueError(f"known_external tiene conflicto para observed_name: {observed}")
+        result[key] = identity
+    return result
 
 
 def load_known_external(path: str | Path) -> Mapping[str, KnownExternalIdentity]:
@@ -18,19 +39,4 @@ def load_known_external(path: str | Path) -> Mapping[str, KnownExternalIdentity]
         required = {"observed_name", "reason", "provenance"}
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
             raise ValueError("known_external requiere observed_name, reason y provenance")
-        result: dict[str, KnownExternalIdentity] = {}
-        for row_number, row in enumerate(reader, start=2):
-            observed = str(row.get("observed_name", "")).strip()
-            reason = str(row.get("reason", "")).strip()
-            provenance = str(row.get("provenance", "")).strip()
-            if not observed:
-                raise ValueError(f"known_external observed_name vacío en fila {row_number}")
-            if not reason or not provenance:
-                raise ValueError(f"known_external requiere reason y provenance en fila {row_number}")
-            key = strict_name_key(observed)
-            identity = KnownExternalIdentity(observed, reason, provenance)
-            previous = result.get(key)
-            if previous is not None and previous != identity:
-                raise ValueError(f"known_external tiene conflicto para observed_name: {observed}")
-            result[key] = identity
-    return result
+        return known_external_from_rows(reader)
