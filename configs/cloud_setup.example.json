@@ -1,0 +1,119 @@
+{
+  "program": {
+    "program_name": "Programa Demo",
+    "participant_mode": "official",
+    "sessions": [
+      {
+        "session_number": 1,
+        "session_id": "DEMO-S01",
+        "session_name": "Sesión 1",
+        "evidence_sources": [
+          {
+            "provider": "google_drive",
+            "kind": "artifact",
+            "ref": "replace-with-transcript-file-id",
+            "evidence_type": "transcript"
+          },
+          {
+            "provider": "google_drive",
+            "kind": "artifact",
+            "ref": "replace-with-chat-file-id",
+            "evidence_type": "chat"
+          }
+        ]
+      },
+      {
+        "session_number": 2,
+        "session_id": "DEMO-S02",
+        "session_name": "Sesión 2",
+        "evidence_sources": [
+          {
+            "provider": "google_drive",
+            "kind": "artifact",
+            "ref": "replace-with-transcript-file-id",
+            "evidence_type": "transcript"
+          },
+          {
+            "provider": "google_drive",
+            "kind": "artifact",
+            "ref": "replace-with-chat-file-id",
+            "evidence_type": "chat"
+          }
+        ]
+      }
+    ]
+  },
+  "roster": {
+    "source": {
+      "type": "google_sheets",
+      "spreadsheet": "https://docs.google.com/spreadsheets/d/replace-with-live-source-id/edit",
+      "sheet": "PARTICIPANTES"
+    }
+  },
+  "known_external": [],
+  "attendance_identity": [],
+  "pilot": {
+    "participation": {
+      "coverage": "UNKNOWN"
+    },
+    "attendance": {
+      "source": {
+        "type": "google_sheets",
+        "spreadsheet": "https://docs.google.com/spreadsheets/d/replace-with-live-source-id/edit",
+        "sheet": "class_participants"
+      },
+      "email_alias_source": {
+        "type": "google_sheets",
+        "spreadsheet": "https://docs.google.com/spreadsheets/d/replace-with-live-source-id/edit",
+        "sheet": "email_aliases",
+        "alias_column": "email_alias",
+        "canonical_column": "email_canonico"
+      },
+      "mapping": {
+        "participant_external_id": {
+          "column": "p_email",
+          "type": "string",
+          "required": true
+        },
+        "session_external_id": {
+          "column": "class_date",
+          "type": "string",
+          "required": true
+        },
+        "metrics": {
+          "attendance_pct": {
+            "column": "p_class_attendance_pct",
+            "type": "number"
+          }
+        }
+      },
+      "coverage": "UNKNOWN"
+    },
+    "session_mapping": {
+      "2026-01-01": {
+        "session_id": "DEMO-S01",
+        "session_order": 1
+      },
+      "2026-01-08": {
+        "session_id": "DEMO-S02",
+        "session_order": 2
+      }
+    },
+    "longitudinal": {
+      "minimum_observations": 1,
+      "recent_window_size": 1,
+      "trend_threshold": 0
+    },
+    "signals": {
+      "version": "pilot.v1",
+      "participation_silence_streak": {
+        "enabled": true,
+        "minimum_streak": 2
+      }
+    },
+    "alerts": {
+      "version": "pilot.v1",
+      "silence_level": "OBSERVAR"
+    }
+  }
+}
