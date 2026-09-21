@@ -79,15 +79,15 @@ the preferred operational flow.
 
 ## Per-session operation
 
-After a session, the agent should be able to run the program from the existing
-cloud configuration:
+After a session, the agent runs the program from the existing cloud
+configuration:
 
     new/changed Meet evidence
-        -> participacion-sync
-        -> Participation persisted to Eira Sheet
+        -> eira-run --drive-folder <url>
+        -> reload live roster
+        -> Participation sync
         -> Control reconciled
-        -> read current live attendance source
-        -> eira-pilot --dry-run
+        -> reload live Attendance and email aliases
         -> Observations -> longitudinal analysis -> Signals -> Alerts
 
 Repeated runs with unchanged evidence must remain idempotent.
@@ -97,15 +97,15 @@ converted to zero participation.
 
 ## Local machine responsibilities
 
-A machine or agent runtime may still have:
+A machine or agent runtime still needs:
 
 - a clone/install of this repository;
 - Python dependencies;
-- Google OAuth credentials;
-- internal cache/state required by the current CLI implementation.
+- Google OAuth credentials.
 
-Those are runtime infrastructure. They must not become the only authoritative
-copy of program data or force the user to create a per-program local folder.
+Those are runtime infrastructure. A cloud-first program does not require a
+persistent local registry, state file, roster copy, Attendance export, or
+per-client workspace.
 
 The intended recovery property is:
 
@@ -113,13 +113,36 @@ The intended recovery property is:
 > an operator should be able to continue the program without reconstructing a
 > client workspace from exported local files.
 
-## Current implementation boundary
+## Cloud-authoritative persistence
 
-The current runtime still uses local registry/state files internally for
-one-shot CLI execution. Treat them as implementation state, not as the user
-workspace. Moving all operational registry/state into cloud-backed program
-metadata is a separate migration and must preserve deterministic behavior and
-idempotency.
+`eira-setup` creates or reuses the Eira workbook and persists two technical
+tabs:
+
+- **Configuración** — versioned program bundle: program/session references,
+  live roster source, Pilot configuration, explicit known externals and
+  identity policy;
+- **Estado** — versioned deterministic sync state and evidence fingerprints.
+
+`eira-run` reconstructs the runtime from those tabs. It may create ephemeral
+temporary files internally to reuse legacy components, but they are disposable
+and never authoritative.
+
+The live roster is reconciled before Participation processing. If the source
+does not declare optional fields such as aliases or enrollment bounds, Eira
+preserves the corresponding existing participant fields rather than erasing
+them. Attendance and an optional email-alias tab are reread on every run.
+
+The recovery acceptance test is:
+
+1. start on a different machine/runtime;
+2. clone/install Eira;
+3. authorize Google;
+4. provide the program Drive-folder link;
+5. run `eira-run`;
+6. continue processing without reconstructing client files or local config.
+
+Legacy `participacion-init`, `participacion-sync`, and
+`eira-pilot --config` remain available for backwards compatibility.
 
 The cloud-first rule for new features is:
 

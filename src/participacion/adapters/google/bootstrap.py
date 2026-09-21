@@ -18,8 +18,8 @@ from typing import Any
 from ...application.init_program import InitPlan, build_plan, validate_session_count
 from ...application.registry import load_programs, save_programs
 from ...application.roster import roster_records_from_rows, roster_records_to_participants
-from .sheets.schema import (CONTROL_HEADERS, PARTICIPANT_HEADERS, PROGRAM_HEADERS,
-                            RANKING_HEADERS, REQUIRED_SHEETS, SESSION_HEADERS)
+from .sheets.schema import (CLOUD_JSON_HEADERS, CONTROL_HEADERS, PARTICIPANT_HEADERS,
+                            PROGRAM_HEADERS, RANKING_HEADERS, REQUIRED_SHEETS, SESSION_HEADERS)
 from ..roster.csv_source import read_csv_roster
 from ..roster.google_source import read_google_roster
 from ..roster.xlsx_source import read_xlsx_roster
@@ -175,6 +175,8 @@ def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict
                                           record.get("state_key", record.get("source_ref", record.get("folder_id", ""))),
                                           "pending", "pending", "pending", "", "Sí"]
                                          for record in session_records],
+        "Configuración": [CLOUD_JSON_HEADERS],
+        "Estado": [CLOUD_JSON_HEADERS],
     }
 
 
@@ -182,6 +184,7 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
                   session_records: list[dict[str, Any]]) -> str:
     title = f"Participación - {plan.program_name}"
     newly_created = plan.sheet_id is None
+    added_sheets: list[str] = []
     if plan.sheet_id:
         sheet_id = plan.sheet_id
         existing = sheets.spreadsheets().get(spreadsheetId=sheet_id, includeGridData=False).execute()
@@ -189,8 +192,9 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
         extras = [name for name in names if name not in REQUIRED_SHEETS]
         if extras:
             raise RuntimeError("El Sheet existente contiene hojas adicionales: " + ", ".join(extras))
+        added_sheets = [name for name in REQUIRED_SHEETS if name not in names]
         requests = [{"addSheet": {"properties": {"title": name}}}
-                    for name in REQUIRED_SHEETS if name not in names]
+                    for name in added_sheets]
         if requests:
             sheets.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": requests}).execute()
     else:
@@ -204,12 +208,14 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
         ).execute()
         drive.files().update(fileId=sheet_id, addParents=plan.folder_id,
                              fields="id,parents", supportsAllDrives=True).execute()
-    # Solo inicializar valores en un Sheet recién creado. Un Sheet existente
-    # se inspecciona y, como máximo, recibe pestañas faltantes; nunca se
-    # sobrescribe su contenido.
-    if newly_created:
-        values = _sheet_values(plan, session_records)
-        for sheet_name, rows in values.items():
+    values = _sheet_values(plan, session_records)
+    # Un workbook nuevo recibe todas las hojas. En uno existente solo se
+    # inicializan las hojas que acaban de agregarse; nunca se sobrescriben
+    # datos ya presentes.
+    target_sheets = list(values) if newly_created else added_sheets
+    for sheet_name in target_sheets:
+        rows = values.get(sheet_name, [])
+        if rows:
             sheets.spreadsheets().values().update(
                 spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
                 valueInputOption="RAW", body={"values": rows},
@@ -217,8 +223,13 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
     return sheet_id
 
 
-def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[str, Any]) -> dict[str, Any]:
-    """Perform writes only after the caller has received confirmation."""
+def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[str, Any],
+                 *, persist_local_registry: bool = True) -> dict[str, Any]:
+    """Perform writes only after the caller has received confirmation.
+
+    Cloud-first callers can disable the legacy local registry. The returned
+    program record is then persisted in the Eira workbook instead.
+    """
     children = list_children(drive, plan.folder_id)
     if plan.current_folder_name != plan.program_name:
         drive.files().update(fileId=plan.folder_id, body={"name": plan.program_name},
@@ -257,9 +268,10 @@ def execute_init(plan: InitPlan, drive: Any, sheets: Any, folder_metadata: dict[
                          "metadata": {"url": plan.folder_url}},
               "output": {"provider": "google_sheets", "ref": sheet_id},
               "sessions": session_records, "created_at": dt.datetime.now(dt.timezone.utc).isoformat()}
-    existing = load_programs(REGISTRY_PATH)
-    existing[plan.folder_id] = record
-    save_programs(REGISTRY_PATH, existing)
+    if persist_local_registry:
+        existing = load_programs(REGISTRY_PATH)
+        existing[plan.folder_id] = record
+        save_programs(REGISTRY_PATH, existing)
     return record
 
 

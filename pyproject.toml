@@ -39,6 +39,8 @@ participacion-sync = "participacion.cli.main:main"
 participacion-init = "participacion.cli.init:main"
 participacion-google-auth = "participacion.cli.google_auth:main"
 eira-pilot = "participacion.cli.pilot:main"
+eira-setup = "participacion.cli.cloud:setup_main"
+eira-run = "participacion.cli.cloud:run_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

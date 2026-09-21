@@ -77,8 +77,9 @@ A normal onboarding starts in conversation:
 5. Ask only for mappings or identity decisions that cannot be established
    deterministically.
 6. Initialize/reuse the Eira Google Sheet in the destination folder.
-7. Run `participacion-sync`, then run the Eira pilot over the current cloud
-   sources.
+7. Persist program configuration and sync state in the Eira workbook itself.
+8. Run `eira-run` from the Drive folder link whenever the program must be
+   processed again.
 
 The roster/attendance source and Meet evidence may live elsewhere in Drive.
 Eira stores references; they do not need to be copied into the destination
@@ -86,31 +87,41 @@ folder.
 
 See [docs/cloud-first-operation.md](docs/cloud-first-operation.md).
 
-## CLI quick start
+## Cloud-first CLI
 
-The CLI remains the deterministic execution layer used by an agent or operator:
+The agent-facing commands do not require a persistent per-program local
+workspace.
 
-1. Run `participacion-google-auth` once for the runtime.
-2. Initialize a program once with `participacion-init` or the equivalent
-   agent-composed evidence-source plan.
-3. Run `participacion-sync` after new/changed session evidence appears.
-4. Run `eira-pilot --config ... --dry-run` to evaluate current Participation
-   plus the configured live Attendance source.
+Authorize Google once on the execution environment:
 
-If sync reports that the `Participantes` sheet requires migration, run
-`participacion-init` and confirm its plan. Planning and cancellation are
-read-only; migration occurs only after confirmation.
+    participacion-google-auth --client-secret /path/to/client_secret.json
 
-Commands:
+For onboarding, the agent builds the setup spec in memory and pipes it to Eira:
 
-- `participacion-google-auth` — OAuth Desktop installed-app flow.
-- `participacion-init` — validate and initialize a program.
-- `participacion-sync` — process one or all registered programs.
-- `participacion-sync --notifier none|stdout|notify-send` — notification backend.
+    cat setup.json | eira-setup \
+      --drive-folder "https://drive.google.com/drive/folders/..." \
+      --spec - --yes
 
-All commands support `--help` without making Google calls. Google operations
-require `participacion-agent[google]`; XLSX roster input requires
-`participacion-agent[xlsx]`.
+`configs/cloud_setup.example.json` documents the contract. The JSON file in
+this example is only a transport format: an agent can send the same JSON over
+stdin without persisting it.
+
+After setup, a new machine or agent only needs the code, Google authorization,
+and the Drive folder link:
+
+    eira-run --drive-folder "https://drive.google.com/drive/folders/..."
+
+`eira-run` reloads the authoritative roster, Attendance, aliases, program
+configuration, evidence references, and sync state from Google Workspace. It
+then runs Participation and the Eira pilot. Repeated runs remain idempotent.
+
+Legacy commands remain available for backwards compatibility:
+
+- `participacion-init`
+- `participacion-sync`
+- `eira-pilot --config ... --dry-run`
+
+They are not the preferred user-facing cloud-first flow.
 
 ## Eira pilot
 
@@ -137,9 +148,15 @@ never generates a Signal or Alert.
 
 ## Configuration and state
 
-The current CLI still keeps registry/state locally as runtime implementation
-state. Do **not** require the user to create or maintain a client-specific local
-folder for normal product operation.
+For `eira-setup` / `eira-run`, the Eira workbook is authoritative:
+
+- `Configuración` stores the cloud program bundle;
+- `Estado` stores deterministic processing state and fingerprints;
+- `Participantes` is reconciled from the configured live roster on each run;
+- Attendance and explicit email aliases are reread from their live Google
+  Sheets on each run.
+
+The local registry/state variables below apply only to the legacy CLI:
 
 - `PARTICIPACION_CONFIG_DIR` — default `~/.config/participacion`.
 - `PARTICIPACION_STATE_DIR` — default `~/.local/state/participacion`.

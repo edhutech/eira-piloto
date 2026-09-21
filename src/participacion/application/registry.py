@@ -110,6 +110,11 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
                          str(value.get("known_external_path", "") or "").strip())
 
 
+def program_from_dict(value: Mapping[str, Any]) -> ProgramRecord:
+    """Public parser used by local and cloud registries."""
+    return _program(value)
+
+
 def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord]:
     if not path.exists():
         return {}
@@ -124,7 +129,7 @@ def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord
             raise ValueError("programs.json v1 requiere programs")
     programs = {}
     for registry_id, value in raw.items():
-        program = _program(value)
+        program = program_from_dict(value)
         if str(registry_id).strip() and str(registry_id) != program.program_id:
             raise ValueError(f"La clave del registro no coincide con program_id: {registry_id}")
         programs[program.program_id] = program
@@ -161,9 +166,14 @@ def _encode_program(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any
             "sessions": encoded_sessions}
 
 
+def program_to_dict(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any]:
+    """Public encoder used by local and cloud registries."""
+    return _encode_program(program)
+
+
 def save_programs(path: Path, programs: Mapping[str, ProgramRecord | Mapping[str, Any]]) -> None:
     payload = {"version": REGISTRY_VERSION,
-               "programs": {key: _encode_program(program) for key, program in programs.items()}}
+               "programs": {key: program_to_dict(program) for key, program in programs.items()}}
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent, text=True)
     try:

@@ -19,8 +19,8 @@ class PilotConfig:
     program_id: str
     program_name: str
     google_sheet_id: str
-    attendance_source: Mapping[str, Any]
-    attendance_mapping: ExternalDataMapping
+    attendance_source: Mapping[str, Any] | None
+    attendance_mapping: ExternalDataMapping | None
     session_mapping: Mapping[str, SessionMappingEntry]
     longitudinal: LongitudinalConfig
     signal_version: str
@@ -34,7 +34,9 @@ class PilotConfig:
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "PilotConfig":
         program = _mapping(raw.get("program"), "program")
-        attendance = _mapping(raw.get("attendance"), "attendance")
+        attendance_raw = raw.get("attendance")
+        attendance = (_mapping(attendance_raw, "attendance")
+                      if attendance_raw is not None else None)
         session_mapping = _mapping(raw.get("session_mapping"), "session_mapping")
         sessions: dict[str, SessionMappingEntry] = {}
         for external_id, value in session_mapping.items():
@@ -61,8 +63,11 @@ class PilotConfig:
             program_id=_text(program.get("program_id"), "program.program_id"),
             program_name=_text(program.get("program_name"), "program.program_name"),
             google_sheet_id=_text(program.get("sheet_id"), "program.sheet_id"),
-            attendance_source=_mapping(attendance.get("source"), "attendance.source"),
-            attendance_mapping=ExternalDataMapping.from_dict(_mapping(attendance.get("mapping"), "attendance.mapping")),
+            attendance_source=(_mapping(attendance.get("source"), "attendance.source")
+                               if attendance is not None else None),
+            attendance_mapping=(ExternalDataMapping.from_dict(
+                _mapping(attendance.get("mapping"), "attendance.mapping"))
+                if attendance is not None else None),
             session_mapping=sessions,
             longitudinal=longitudinal,
             signal_version=_text(signals.get("version", "pilot.v1"), "signals.version"),
@@ -70,8 +75,9 @@ class PilotConfig:
             silence_minimum_streak=minimum_streak,
             alert_version=_text(_mapping(raw.get("alerts"), "alerts").get("version", "pilot.v1"), "alerts.version"),
             participation_coverage=_coverage(_mapping(raw.get("participation"), "participation").get("coverage", "UNKNOWN")),
-            attendance_coverage=_coverage(attendance.get("coverage", "UNKNOWN")),
-            attendance_identity_path=str(attendance.get("identity_path", "")).strip(),
+            attendance_coverage=_coverage(attendance.get("coverage", "UNKNOWN")) if attendance is not None else SourceCoverage.UNKNOWN,
+            attendance_identity_path=(str(attendance.get("identity_path", "")).strip()
+                                      if attendance is not None else ""),
         )
 
     @classmethod
@@ -98,7 +104,10 @@ class PilotConfig:
         return {
             "program": {"program_id": self.program_id, "program_name": self.program_name, "sheet_id": self.google_sheet_id},
             "participation": {"source_id": f"google_sheets:{self.google_sheet_id}", "coverage": self.participation_coverage.value},
-            "attendance": {"source": dict(self.attendance_source), "mapping": _mapping_to_dict(self.attendance_mapping), "coverage": self.attendance_coverage.value},
+            **({"attendance": {"source": dict(self.attendance_source or {}),
+                                 "mapping": _mapping_to_dict(self.attendance_mapping),
+                                 "coverage": self.attendance_coverage.value}}
+               if self.attendance_mapping is not None else {}),
             "session_mapping": {key: {"session_id": value.session_id, "session_order": value.session_order} for key, value in self.session_mapping.items()},
             "longitudinal": {"minimum_observations": self.longitudinal.minimum_observations, "recent_window_size": self.longitudinal.recent_window_size, "trend_threshold": self.longitudinal.trend_threshold},
             "signals": {"version": self.signal_version, "participation_silence_streak": {"enabled": self.silence_enabled, "minimum_streak": self.silence_minimum_streak}},

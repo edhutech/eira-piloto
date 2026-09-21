@@ -25,7 +25,7 @@ from .results import HistoricalSnapshot, PilotResult
 @dataclass(frozen=True)
 class PilotSources:
     participant_scores: Callable[[], Iterable[ParticipantSessionScore]]
-    attendance_table: Callable[[], TabularTable]
+    attendance_table: Callable[[], TabularTable] | None
     participant_resolver: ExternalParticipantResolver
     applicability_resolver: ApplicabilityResolver | None = None
     participant_ids: Callable[[], Iterable[str]] | None = None
@@ -61,21 +61,31 @@ class PilotRunner:
             session_statuses=(self.sources.participation_statuses() if self.sources.participation_statuses else {}),
         )
 
-        mapping_result = map_table(self.sources.attendance_table(), self.config.attendance_mapping)
-        attendance_resolver = MappingSessionResolver(session_by_external)
-        attendance_module = AttendanceModule(
-            self.sources.participant_resolver,
-            attendance_resolver,
-            applicability,
-            AttendanceConfig({metric: metric for metric in self.config.attendance_mapping.metrics}),
-        )
-        attendance_result = attendance_module.build_observations(
-            AttendanceInput(mapping_result.facts, coverage=self.config.attendance_coverage)
-        )
-        observations = tuple(participation_result.observations + attendance_result.observations)
-        issues: tuple[object, ...] = tuple(participation_result.issues) + tuple(attendance_result.issues)
-        if mapping_result.status is not MappingStatus.VALID:
-            issues += tuple(mapping_result.issues)
+        attendance_observations: list[Observation] = []
+        attendance_issues: tuple[object, ...] = ()
+        if self.config.attendance_mapping is not None:
+            if self.sources.attendance_table is None:
+                raise ValueError("Attendance está configurado pero no existe attendance_table")
+            mapping_result = map_table(self.sources.attendance_table(), self.config.attendance_mapping)
+            attendance_resolver = MappingSessionResolver(session_by_external)
+            attendance_module = AttendanceModule(
+                self.sources.participant_resolver,
+                attendance_resolver,
+                applicability,
+                AttendanceConfig({
+                    metric: metric for metric in self.config.attendance_mapping.metrics
+                }),
+            )
+            attendance_result = attendance_module.build_observations(
+                AttendanceInput(mapping_result.facts, coverage=self.config.attendance_coverage)
+            )
+            attendance_observations = list(attendance_result.observations)
+            attendance_issues = tuple(attendance_result.issues)
+            if mapping_result.status is not MappingStatus.VALID:
+                attendance_issues += tuple(mapping_result.issues)
+
+        observations = tuple(list(participation_result.observations) + attendance_observations)
+        issues: tuple[object, ...] = tuple(participation_result.issues) + attendance_issues
 
         signal_engine = self._signal_engine()
         alert_engine = self._alert_engine()
