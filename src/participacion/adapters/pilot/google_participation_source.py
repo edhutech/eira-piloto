@@ -56,7 +56,31 @@ class ReadOnlyGoogleParticipationSource:
         return result
 
     def statuses(self) -> Mapping[str, str]:
-        return dict(self.processing_statuses or {})
+        if self.processing_statuses:
+            return dict(self.processing_statuses)
+        response = self.sheets_service.spreadsheets().values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range="'Control'!A:ZZ",
+        ).execute()
+        values = response.get("values", [])
+        if not values:
+            return {}
+        headers = [str(value).strip().casefold() for value in values[0]]
+        required = {"session_number", "processing_status"}
+        if not required.issubset(headers):
+            raise ValueError("La hoja Control requiere session_number y processing_status")
+        positions = {header: index for index, header in enumerate(headers)}
+        result: dict[str, str] = {}
+        for row_number, row in enumerate(values[1:], 2):
+            padded = list(row) + [""] * (len(headers) - len(row))
+            raw_number = str(padded[positions["session_number"]]).strip()
+            if not raw_number:
+                continue
+            number = _integer(raw_number, row_number)
+            status = str(padded[positions["processing_status"]]).strip().upper()
+            if status:
+                result[str(number)] = status
+        return result
 
 
 def build_participant_resolver(participants: list[Participant]) -> ParticipantResolverAdapter:
