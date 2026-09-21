@@ -207,11 +207,13 @@ class FakeGoogleService:
 
 class InitRankingTests(unittest.TestCase):
     def test_new_program_includes_ranking_tab_in_order(self):
-        self.assertEqual(REQUIRED_SHEETS, ["Seguimiento", "Seguimiento individual", "Ranking", "Participantes", "Control", "Sesiones", "Programa"])
+        self.assertEqual(REQUIRED_SHEETS, ["Seguimiento", "Seguimiento individual", "Ranking", "Participantes", "Control", "Sesiones", "Programa", "Configuración", "Estado"])
         self.assertEqual(_sheet_values.__name__, "_sheet_values")
         plan = type("Plan", (), {"program_name": "P", "folder_id": "f", "folder_url": "u", "session_count": 1, "participant_mode": "auto", "participants": []})()
         values = _sheet_values(plan, [])
         self.assertEqual(values["Ranking"], [RANKING_HEADERS])
+        self.assertEqual(values["Configuración"], [["key", "value_json", "updated_at"]])
+        self.assertEqual(values["Estado"], [["key", "value_json", "updated_at"]])
 
 
 class HttpError(Exception):
