@@ -48,6 +48,10 @@
       "type": "google_sheets",
       "spreadsheet": "https://docs.google.com/spreadsheets/d/replace-with-live-source-id/edit",
       "sheet": "PARTICIPANTES"
+    },
+    "mapping": {
+      "nombre": "p_display_name",
+      "correo": "p_email"
     }
   },
   "known_external": [],
