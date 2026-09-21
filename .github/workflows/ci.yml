@@ -45,6 +45,12 @@ jobs:
       - run: participacion-sync --help
       - run: participacion-init --help
       - run: participacion-google-auth --help
+      - run: eira-pilot --help
+      - run: eira-setup --help
+      - run: eira-run --help
+      - run: eira-pilot --help
+      - run: eira-setup --help
+      - run: eira-run --help
 
   packaging:
     runs-on: ubuntu-latest
