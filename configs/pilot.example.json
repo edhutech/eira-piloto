@@ -2,16 +2,16 @@
   "program": {
     "program_id": "replace-with-program-id",
     "program_name": "replace-with-program-name",
-    "sheet_id": "replace-with-google-sheet-id"
+    "sheet_id": "replace-with-eira-google-sheet-id"
   },
   "participation": {
-    "source_id": "google_sheets:replace-with-google-sheet-id",
+    "source_id": "google_sheets:replace-with-eira-google-sheet-id",
     "coverage": "UNKNOWN"
   },
   "attendance": {
     "source": {
-      "type": "xlsx",
-      "file": "path/to/attendance.xlsx",
+      "type": "google_sheets",
+      "spreadsheet": "https://docs.google.com/spreadsheets/d/replace-with-live-source-id/edit",
       "sheet": "participants"
     },
     "mapping": {
