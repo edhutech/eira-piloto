@@ -2,7 +2,7 @@
 
 REQUIRED_SHEETS = [
     "Seguimiento", "Seguimiento individual", "Ranking", "Participantes",
-    "Control", "Sesiones", "Programa",
+    "Control", "Sesiones", "Programa", "Configuración", "Estado",
 ]
 
 PROGRAM_HEADERS = [
@@ -33,6 +33,7 @@ FOLLOW_UP_HEADERS = [
     "Participó", "Frecuencia", "Últimas 4", "Última participación", "Score acumulado",
     "Seguimiento", "Desde", "Motivo", "Nota / Acción", "follow_up_ruleset_version",
 ]
+CLOUD_JSON_HEADERS = ["key", "value_json", "updated_at"]
 
 STATIC_HEADERS = {
     "Programa": PROGRAM_HEADERS,
@@ -41,4 +42,6 @@ STATIC_HEADERS = {
     "Ranking": RANKING_HEADERS,
     "Control": CONTROL_HEADERS,
     "Seguimiento individual": FOLLOW_UP_HEADERS,
+    "Configuración": CLOUD_JSON_HEADERS,
+    "Estado": CLOUD_JSON_HEADERS,
 }
