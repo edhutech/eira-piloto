@@ -255,7 +255,10 @@ def setup_main(argv: list[str] | None = None) -> int:
             GoogleSheetsJsonStore(sheets, record["output"]["ref"], "Estado")
         )
         config_store.put(CLOUD_BUNDLE_KEY, bundle)
-        state_store.save({"version": 1, "programs": {}})
+        if state_store.store.get(state_store.key) is None:
+            state_store.save({"version": 1, "programs": {}})
+        else:
+            state_store.load()  # validate existing authoritative state without resetting it
         print(json.dumps({
             "status": "READY",
             "program_id": record["program_id"],
