@@ -52,7 +52,8 @@ def _sheet_ids(sheets: Any, spreadsheet_id: str) -> dict[str, int]:
 
 
 def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
-                 state_path: Path = DEFAULT_STATE_PATH) -> ProgramRunner:
+                 state_path: Path = DEFAULT_STATE_PATH,
+                 *, state_store: Any | None = None) -> ProgramRunner:
     programs = load_programs(programs_path)
     if not programs:
         def no_dependencies(program_id: str, program: Any) -> ProgramDependencies:
@@ -61,7 +62,7 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             programs=programs,
             source=None,
             dependencies_factory=no_dependencies,
-            state_store=FileStateStore(state_path),
+            state_store=state_store or FileStateStore(state_path),
             discovery=select_and_inspect,
         )
     drive, sheets, docs = get_google_services_with_docs()
@@ -123,7 +124,7 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
         programs=programs,
         source=drive,
         dependencies_factory=make_dependencies,
-        state_store=FileStateStore(state_path),
+        state_store=state_store or FileStateStore(state_path),
         discovery=select_and_inspect,
     )
 
