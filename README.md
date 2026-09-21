@@ -61,12 +61,41 @@ The command stores an authorized-user token at
 `--token` or `PARTICIPACION_GOOGLE_TOKEN`. The client secret can also be set
 with `PARTICIPACION_GOOGLE_CLIENT_SECRET`. Never commit either file.
 
-## Quick start
+## Cloud-first operation
 
-1. Run `participacion-google-auth`.
-2. Run `participacion-init` and confirm its dry-run plan once.
-3. Put or upload session evidence in the prepared folders.
-4. Run `participacion-sync`.
+The intended product flow is **agent-operated and Google Workspace first**.
+A program does not require a user-managed local workspace.
+
+A normal onboarding starts in conversation:
+
+1. Ask the user for the Google Drive folder where Eira should live.
+2. Ask whether there is an existing live roster/attendance source.
+3. If there is one, accept the Google Sheet link directly and inspect the
+   authorized tabs/columns. Do not ask the user to export it to CSV/XLSX.
+4. Ask for the session evidence location(s) and build explicit evidence-source
+   references.
+5. Ask only for mappings or identity decisions that cannot be established
+   deterministically.
+6. Initialize/reuse the Eira Google Sheet in the destination folder.
+7. Run `participacion-sync`, then run the Eira pilot over the current cloud
+   sources.
+
+The roster/attendance source and Meet evidence may live elsewhere in Drive.
+Eira stores references; they do not need to be copied into the destination
+folder.
+
+See [docs/cloud-first-operation.md](docs/cloud-first-operation.md).
+
+## CLI quick start
+
+The CLI remains the deterministic execution layer used by an agent or operator:
+
+1. Run `participacion-google-auth` once for the runtime.
+2. Initialize a program once with `participacion-init` or the equivalent
+   agent-composed evidence-source plan.
+3. Run `participacion-sync` after new/changed session evidence appears.
+4. Run `eira-pilot --config ... --dry-run` to evaluate current Participation
+   plus the configured live Attendance source.
 
 If sync reports that the `Participantes` sheet requires migration, run
 `participacion-init` and confirm its plan. Planning and cancellation are
@@ -85,22 +114,32 @@ require `participacion-agent[google]`; XLSX roster input requires
 
 ## Eira pilot
 
-The experimental pilot is a separate, read-only composition over the existing
-Participation results and a configured structured source:
+The experimental pilot is a separate, read-only composition over persisted
+Participation results and configured structured sources:
 
-    eira-pilot --config configs/local/pilot.json --dry-run
+    eira-pilot --config <runtime-config> --dry-run
 
-It reads persisted Participation results after `participacion-sync`, imports
-the configured XLSX/CSV source through the generic reader and mapping, builds
-Observations, historical as-of-session snapshots, deterministic Signals, and
-Alerts. It does not modify Google Sheets and it does not invoke the existing
-sync runner. Use `configs/pilot.example.json` and
-`configs/session_mapping.example.json` as client-neutral templates. Real paths,
-Google IDs, mappings, source files, outcomes, and pilot results belong under
-ignored local paths. `BAJAS` is used only by the separate retrospective
-evaluation and never generates a Signal or Alert.
+For normal operation, Attendance should point to the **live Google Sheet** that
+the organization already updates after each session. Eira reads its current
+values on every run through the generic tabular mapping layer. XLSX remains a
+backwards-compatible import/testing source, not the preferred live workflow.
+
+The pilot builds Observations, historical as-of-session snapshots,
+deterministic Signals, and Alerts. It does not modify Google Sheets and it does
+not invoke the existing sync runner. Use `configs/pilot.example.json` and
+`configs/session_mapping.example.json` as client-neutral templates.
+
+Runtime config/cache files may exist on the execution machine, but they are
+implementation state rather than a user-facing per-program workspace. Program
+evidence and authoritative operational sources should remain in Google
+Workspace. `BAJAS` is used only by the separate retrospective evaluation and
+never generates a Signal or Alert.
 
 ## Configuration and state
+
+The current CLI still keeps registry/state locally as runtime implementation
+state. Do **not** require the user to create or maintain a client-specific local
+folder for normal product operation.
 
 - `PARTICIPACION_CONFIG_DIR` — default `~/.config/participacion`.
 - `PARTICIPACION_STATE_DIR` — default `~/.local/state/participacion`.

@@ -130,7 +130,7 @@ class ExternalDataTests(unittest.TestCase):
         config = json.loads(
             Path("configs/pilot.example.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(config["attendance"]["source"]["type"], "xlsx")
+        self.assertEqual(config["attendance"]["source"]["type"], "google_sheets")
         parsed = ExternalDataMapping.from_dict(config["attendance"]["mapping"])
         self.assertEqual(parsed.participant.column, "external_participant_id")
         self.assertEqual(parsed.session.column, "class_date")

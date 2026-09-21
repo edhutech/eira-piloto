@@ -5,12 +5,13 @@ import json
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
-from ..adapters.google.bootstrap import get_google_services
+from ..adapters.google.bootstrap import extract_spreadsheet_id, get_google_services
 from ..adapters.pilot.google_participation_source import ReadOnlyGoogleParticipationSource, build_participant_resolver
-from ..application.attendance_identity import load_attendance_identity_policy
+from ..adapters.tabular.google_sheets_reader import read_google_sheet_table
 from ..adapters.tabular.xlsx_reader import read_xlsx_table
+from ..application.attendance_identity import load_attendance_identity_policy
 from ..application.pilot.config import PilotConfig
 from ..application.pilot.outcomes import OutcomeMapping, map_outcomes
 from ..application.pilot.runner import PilotRunner, PilotSources, RosterApplicabilityResolver
@@ -28,10 +29,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = PilotConfig.load(str(args.config))
         raw = json.loads(args.config.expanduser().read_text(encoding="utf-8"))
-        attendance_source = config.attendance_source
-        attendance_path = _resolve_local_path(args.config, str(attendance_source.get("file", "")))
-        if str(attendance_source.get("type", "")).casefold() != "xlsx":
-            raise ValueError("El piloto actual requiere una fuente Attendance XLSX")
         _, sheets = get_google_services()
         statuses = raw.get("processing_statuses", {})
         if not isinstance(statuses, dict):
@@ -44,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
             participant_resolver = load_attendance_identity_policy(identity_path, participant_resolver)
         session_orders = {item.session_id: item.session_order for item in config.session_mapping.values()}
         applicability = RosterApplicabilityResolver(participants, session_orders)
-        table = read_xlsx_table(attendance_path, sheet_name=str(attendance_source.get("sheet", "")))
+        table = _read_attendance_table(args.config, config.attendance_source, sheets)
         result = PilotRunner(
             config,
             PilotSources(google_source.scores, lambda: table, participant_resolver, applicability,
@@ -57,6 +54,26 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}")
         return 1
+
+
+def _read_attendance_table(config_path: Path, source: Mapping[str, Any], sheets: Any):
+    source_type = str(source.get("type", "")).strip().casefold()
+    sheet_name = str(source.get("sheet", "")).strip()
+    if source_type == "google_sheets":
+        spreadsheet = str(
+            source.get("spreadsheet")
+            or source.get("spreadsheet_id")
+            or source.get("url")
+            or ""
+        ).strip()
+        if not spreadsheet:
+            raise ValueError("Attendance Google Sheets requiere spreadsheet o spreadsheet_id")
+        spreadsheet_id = extract_spreadsheet_id(spreadsheet)
+        return read_google_sheet_table(sheets, spreadsheet_id, sheet_name=sheet_name)
+    if source_type == "xlsx":
+        attendance_path = _resolve_local_path(config_path, str(source.get("file", "")))
+        return read_xlsx_table(attendance_path, sheet_name=sheet_name)
+    raise ValueError("Attendance source.type debe ser google_sheets o xlsx")
 
 
 def _aggregate(result: Any) -> dict[str, Any]:
@@ -85,13 +102,20 @@ def _aggregate(result: Any) -> dict[str, Any]:
     }
 
 
-def _retrospective(raw: dict[str, Any], config_path: Path, result: Any, participants: list[Any], attendance_path: Path) -> dict[str, Any]:
+def _retrospective(raw: dict[str, Any], config_path: Path, result: Any, participants: list[Any],
+                   attendance_path: Path | None = None) -> dict[str, Any]:
     raw_outcomes = raw.get("outcomes")
     if not isinstance(raw_outcomes, dict):
         return {"status": "NOT_CONFIGURED"}
     source = raw_outcomes.get("source", {})
     mapping_raw = raw_outcomes.get("mapping", {})
-    outcome_path = _resolve_local_path(config_path, str(source.get("file", attendance_path)))
+    outcome_file = str(source.get("file", "")).strip()
+    if not outcome_file:
+        if attendance_path is None:
+            raise ValueError("Retrospective outcomes requiere source.file explícito")
+        outcome_path = attendance_path
+    else:
+        outcome_path = _resolve_local_path(config_path, outcome_file)
     table = read_xlsx_table(outcome_path, sheet_name=str(source.get("sheet", "")))
     records = [{"participant_id": p.participant_id, "nombre": p.nombre, "correo": p.correo,
                 "aliases": p.aliases, "role": p.role} for p in participants]
