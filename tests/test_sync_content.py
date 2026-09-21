@@ -121,6 +121,25 @@ class ContentAndParserTests(unittest.TestCase):
         self.assertEqual(result.events[0].timestamp_seconds, 1.0)
         self.assertIn("segunda línea", result.events[0].raw_text)
 
+    def test_text_plain_sbv_uses_block_parser(self):
+        content = (FIXTURES / "chat.sbv").read_text()
+        result = TxtParser().parse(file_meta("chat-export", "text/plain"), content, 2, EvidenceContext("chat"))
+        self.assertTrue(result.valid)
+        self.assertEqual((result.artifact_type, result.channel, len(result.events)), ("chat", "chat", 2))
+
+    def test_sbv_message_colons_do_not_create_extra_speakers(self):
+        content = "0:00:00.000,0:00:03.000\nPersona Ejemplo: Mi Kriptonita: soy desordenada\nMi superpoder: todavía lo estoy descubriendo\n"
+        result = TxtParser().parse(file_meta("chat-export", "text/plain"), content, 1, EvidenceContext("chat"))
+        self.assertEqual(len(result.events), 1)
+        self.assertEqual(result.events[0].participant_raw, "Persona Ejemplo")
+        self.assertIn("Mi superpoder:", result.events[0].raw_text)
+
+    def test_text_plain_sbv_requires_all_blocks_to_be_structured(self):
+        content = "0:00:00.000,0:00:03.000\nPersona Ejemplo: válido\n\nno timestamp\nOtro: no"
+        result = TxtParser().parse(file_meta("chat-export", "text/plain"), content, 1, EvidenceContext("chat"))
+        self.assertEqual(result.parser_name, "txt")
+        self.assertTrue(result.valid)
+
     def test_sbv_invalid(self):
         result = SbvParser().parse(file_meta("bad.sbv"), "no timestamp\ntexto", 1)
         self.assertFalse(result.valid)

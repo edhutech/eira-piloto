@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
 from types import SimpleNamespace
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Protocol, Sequence
 
 from ..core.countability import COUNTABILITY_RULESET_VERSION, classify_event
 from ..core.models import SourceArtifact, SessionInspection
@@ -24,6 +24,10 @@ class SessionProcessStatus(str, Enum):
 
 class SessionProcessingError(RuntimeError):
     """An expected operational failure at an injected component boundary."""
+
+
+class EventResolver(Protocol):
+    def resolve_event(self, event: Any) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -72,7 +76,7 @@ class SessionProcessor:
     parsers: Sequence[Any]
     participant_repository: Any
     session_results_repository: SessionResultsStore
-    resolver_factory: Callable[[Iterable[dict[str, Any]]], ParticipantResolver] | None = None
+    resolver_factory: Callable[[Iterable[dict[str, Any]]], EventResolver] | None = None
 
     def process(self, inspection: SessionInspection) -> SessionProcessResult:
         number = inspection.session.session_number

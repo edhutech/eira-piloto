@@ -7,6 +7,7 @@ from participacion.core.models import SourceArtifact, SessionInspection, Session
 from participacion.adapters.parsers.base import ParseResult
 from participacion.core.participants import Participant, ParticipantResolver
 from participacion.application.session_processor import SessionProcessStatus, SessionProcessor
+from participacion.application.modules.resolution import EventIdentityResolver, KnownExternalIdentity
 
 
 
@@ -98,6 +99,27 @@ class SessionProcessorTests(unittest.TestCase):
         self.assertEqual(output.result_rows, 1)
         self.assertEqual(len(results.calls), 1)
         self.assertEqual(results.calls[0][0][0:2], (1, "01 - Sesión 1"))
+
+    def test_known_external_is_ignored_without_participant_or_score(self):
+        files = [SourceArtifact("voice", "voice.vtt"), SourceArtifact("chat", "chat.sbv")]
+        parser_results = {
+            "voice": parsed("transcript", "voice", [event("external", "Externo")]),
+            "chat": parsed("chat", "chat", [event("official", "Ana", "chat")]),
+        }
+        base = ParticipantResolver.official([{"participant_id": "p1", "nombre": "Ana", "correo": "a@example.test"}])
+        policy = EventIdentityResolver(base, {
+            "externo": KnownExternalIdentity("Externo", "outside roster", "test")
+        })
+        processor, participants, results = self.make_processor(
+            files, parser_results, [Participant("p1", "Ana")], resolver_factory=lambda records: policy
+        )
+        output = processor.process(inspection(files))
+        self.assertEqual(output.status, SessionProcessStatus.PROCESSED)
+        self.assertEqual(output.external_events_ignored, 1)
+        self.assertEqual(output.participants_created, 0)
+        self.assertEqual(len(participants.upserted), 0)
+        self.assertEqual(output.result_rows, 1)
+        self.assertEqual(sum(item.voice_total + item.chat_total for item in results.calls[0][0][2]), 1)
 
     def test_missing_transcript_or_chat_is_incomplete_without_persist(self):
         for artifact_type in ("transcript", "chat"):

@@ -28,6 +28,7 @@ class Parser(Protocol):
 
 
 TIME_PATTERN = r"(?:\d+:)?\d{1,2}:\d{2}(?:[\.,]\d{1,3})?"
+SBV_TIMESTAMP_PAIR = re.compile(rf"^{TIME_PATTERN},{TIME_PATTERN}$")
 PRESENTATION_LABEL = re.compile(r"^(?P<base>.+?)[\u0027\u2019]s\s+Presentation\s*$", re.I)
 
 
@@ -59,6 +60,50 @@ def clean_text(value: str) -> str:
 def event_id(artifact_id: str, source_locator: str, participant: str, raw_text: str) -> str:
     value = "\x1f".join((artifact_id, source_locator, participant, raw_text)).encode("utf-8")
     return hashlib.sha256(value).hexdigest()
+
+
+def is_sbv_content(content: str | bytes) -> bool:
+    """Recognize a dominant SBV block stream, independent of filename."""
+    blocks = re.split(r"\n\s*\n", text_content(content).replace("\r\n", "\n"))
+    valid_blocks = 0
+    other_blocks = 0
+    for block in blocks:
+        lines = [line for line in block.split("\n") if line.strip()]
+        if not lines:
+            continue
+        speaker, first = lines[1].split(":", 1) if len(lines) >= 2 and ":" in lines[1] else ("", "")
+        if (len(lines) >= 2 and SBV_TIMESTAMP_PAIR.fullmatch(lines[0].strip())
+                and speaker.strip() and first.strip()):
+            valid_blocks += 1
+        else:
+            other_blocks += 1
+    return valid_blocks >= 1 and (other_blocks == 0 or valid_blocks >= other_blocks * 4)
+
+
+def sbv_events(content: str | bytes, artifact_id: str, session_number: int,
+               channel: Literal["voice", "chat"]) -> list[NormalizedEvent]:
+    """Parse SBV blocks while preserving multiline message continuations."""
+    blocks = re.split(r"\n\s*\n", text_content(content).replace("\r\n", "\n"))
+    events: list[NormalizedEvent] = []
+    pattern = re.compile(rf"^(?P<start>{TIME_PATTERN}),")
+    for block_number, block in enumerate(blocks, 1):
+        lines = [line for line in block.split("\n") if line.strip()]
+        if len(lines) < 2:
+            continue
+        match = pattern.match(lines[0].strip())
+        speaker, first = (lines[1].split(":", 1) if ":" in lines[1] else ("", ""))
+        if not match or not speaker.strip() or not first.strip():
+            continue
+        raw = "\n".join([first.strip(), *[line.strip() for line in lines[2:]]])
+        locator = f"block:{block_number}"
+        label = speaker.strip()
+        identity_type, base_label = classify_participant_label(label)
+        events.append(NormalizedEvent(
+            session_number, label, channel, match.group("start"),
+            timestamp_seconds(match.group("start")), raw, raw, artifact_id, locator,
+            event_id(artifact_id, locator, label, raw), identity_type, base_label,
+        ))
+    return events
 
 
 def speaker_events(text: str, artifact_id: str, session_number: int, channel: Literal["voice", "chat"]) -> list[NormalizedEvent]:

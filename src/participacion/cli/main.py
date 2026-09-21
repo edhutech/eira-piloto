@@ -5,7 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterable
 
 from .init import get_google_services_with_docs
 from ..adapters.google.content import DriveContentReader
@@ -16,6 +16,8 @@ from ..application.program_runner import ProgramDependencies, ProgramRunner
 from ..adapters.filesystem.state import FileStateStore
 from ..adapters.google.sheets.ranking import GoogleSheetsRankingGateway, RankingRepository
 from ..application.registry import DEFAULT_PROGRAMS_PATH, load_programs
+from ..application.known_external import load_known_external
+from ..application.modules.resolution import EventIdentityResolver
 from ..application.session_processor import SessionProcessor
 from ..adapters.google.sheets.session_results import GoogleSheetsSessionResultsGateway, SessionResultsRepository
 from ..adapters.google.sheets.follow_up import (ControlRepository, FollowUpRepository,
@@ -85,14 +87,23 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             follow_up_repository = FollowUpRepository(
                 GoogleSheetsFollowUpGateway(sheets, program.sheet_id),
                 participant_repository, session_results_repository, control_repository)
-            resolver_factory = None
+            resolver_factory: Callable[[Iterable[dict[str, Any]]], Any] | None = None
             if program.participant_mode in {"auto", "import", "official"}:
                 from ..core.participants import ParticipantResolver
-                resolver_factory = {
+                base_factory = {
                     "auto": ParticipantResolver.auto,
                     "import": ParticipantResolver.imported,
                     "official": ParticipantResolver.official,
                 }[program.participant_mode]
+                if program.known_external_path:
+                    known_external = load_known_external(program.known_external_path)
+
+                    def make_resolver(records: Any, base_factory=base_factory,
+                                      known_external=known_external):
+                        return EventIdentityResolver(base_factory(records), known_external)
+                    resolver_factory = make_resolver
+                else:
+                    resolver_factory = base_factory
             processor = SessionProcessor(
                 content_loader=DriveContentReader(drive, docs),
                 parsers=[GoogleDocsParser(), DocxParser(), VttParser(), SbvParser(), TxtParser()],

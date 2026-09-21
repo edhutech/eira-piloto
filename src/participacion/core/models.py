@@ -89,6 +89,7 @@ class ProgramRecord:
     source: ProviderRef
     output: ProviderRef
     sessions: tuple[SessionRecord, ...]
+    known_external_path: str = ""
 
     @property
     def folder_id(self) -> str:

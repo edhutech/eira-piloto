@@ -106,7 +106,8 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
         source = ProviderRef("google_drive", _required_text(value.get("folder_id"), "source.ref"), {"url": str(value.get("folder_url", ""))})
         output = ProviderRef("google_sheets", _required_text(value.get("sheet_id"), "output.ref"))
     return ProgramRecord(program_id, str(value["program_name"]), session_count,
-                         participant_mode, source, output, sessions)
+                         participant_mode, source, output, sessions,
+                         str(value.get("known_external_path", "") or "").strip())
 
 
 def load_programs(path: Path = DEFAULT_PROGRAMS_PATH) -> dict[str, ProgramRecord]:
@@ -155,6 +156,7 @@ def _encode_program(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any
         encoded_sessions.append(item)
     return {"program_id": program.program_id, "program_name": program.program_name,
             "session_count": program.session_count, "participant_mode": program.participant_mode,
+            "known_external_path": program.known_external_path,
             "source": source, "output": output,
             "sessions": encoded_sessions}
 
