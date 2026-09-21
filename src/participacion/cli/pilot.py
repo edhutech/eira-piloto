@@ -36,15 +36,18 @@ def main(argv: list[str] | None = None) -> int:
         google_source = ReadOnlyGoogleParticipationSource(sheets, config.google_sheet_id, statuses)
         participants = google_source.participants()
         participant_resolver: Any = build_participant_resolver(participants)
-        if config.attendance_identity_path:
-            identity_path = _resolve_local_path(args.config, config.attendance_identity_path)
-            participant_resolver = load_attendance_identity_policy(identity_path, participant_resolver)
+        attendance_table = None
+        if config.attendance_source is not None:
+            if config.attendance_identity_path:
+                identity_path = _resolve_local_path(args.config, config.attendance_identity_path)
+                participant_resolver = load_attendance_identity_policy(identity_path, participant_resolver)
+            table = _read_attendance_table(args.config, config.attendance_source, sheets)
+            attendance_table = lambda table=table: table
         session_orders = {item.session_id: item.session_order for item in config.session_mapping.values()}
         applicability = RosterApplicabilityResolver(participants, session_orders)
-        table = _read_attendance_table(args.config, config.attendance_source, sheets)
         result = PilotRunner(
             config,
-            PilotSources(google_source.scores, lambda: table, participant_resolver, applicability,
+            PilotSources(google_source.scores, attendance_table, participant_resolver, applicability,
                          participant_ids=lambda: [item.participant_id for item in participants],
                          participation_statuses=google_source.statuses),
         ).run()
