@@ -74,12 +74,40 @@ def _roster_records(sheets: Any, roster: Mapping[str, Any]) -> tuple[list[Roster
     if not isinstance(source, Mapping):
         raise ValueError("roster.source debe ser un objeto")
     table = _source_table(sheets, source)
-    rows = [list(table.columns)] + [
-        [row.values.get(column) for column in table.columns] for row in table.rows
-    ]
-    return roster_records_from_rows(rows), {
-        str(column).strip().casefold().replace(" ", "_") for column in table.columns
+    raw_mapping = roster.get("mapping")
+    if raw_mapping is None:
+        rows = [list(table.columns)] + [
+            [row.values.get(column) for column in table.columns] for row in table.rows
+        ]
+        columns = {
+            str(column).strip().casefold().replace(" ", "_") for column in table.columns
+        }
+        return roster_records_from_rows(rows), columns
+    if not isinstance(raw_mapping, Mapping):
+        raise ValueError("roster.mapping debe ser un objeto")
+    mapping = {
+        str(key).strip().casefold().replace(" ", "_"): str(value).strip()
+        for key, value in raw_mapping.items()
+        if str(value).strip()
     }
+    missing = [field for field in ("nombre", "correo") if field not in mapping]
+    if missing:
+        raise ValueError("roster.mapping requiere: " + ", ".join(missing))
+    unknown_columns = sorted({column for column in mapping.values() if column not in table.columns})
+    if unknown_columns:
+        raise ValueError("roster.mapping referencia columnas inexistentes: " + ", ".join(unknown_columns))
+    canonical_order = [
+        field for field in (
+            "participant_id", "nombre", "correo", "aliases", "role",
+            "enrollment_status", "start_session", "end_session"
+        )
+        if field in mapping
+    ]
+    rows = [canonical_order] + [
+        [row.values.get(mapping[field]) for field in canonical_order]
+        for row in table.rows
+    ]
+    return roster_records_from_rows(rows), set(canonical_order)
 
 
 def _preserve_unspecified_roster_fields(
