@@ -63,15 +63,22 @@ class FakeRanking:
         return SimpleNamespace(status="NOOP")
 
 
+class FakeControl:
+    def __init__(self):
+        self.calls = []
+    def reconcile(self, inspections, statuses, processed_at):
+        self.calls.append((inspections, dict(statuses), dict(processed_at)))
+
+
 class ProgramRunnerTests(unittest.TestCase):
-    def make_runner(self, state, inspections, processor=None, ranking=None, addons=()):
+    def make_runner(self, state, inspections, processor=None, ranking=None, addons=(), control=None):
         p = program()
         processor = processor or FakeProcessor()
         participants = FakeParticipants()
         sessions = FakeSessionResults()
         ranking = ranking or FakeRanking()
         dependencies = ProgramDependencies(processor, participants, sessions, ranking,
-                                            addons=addons)
+                                            addons=addons, control_repository=control)
         store = SimpleNamespace(value=state, saves=[])
         store.load = lambda: store.value
         def save(value):
@@ -104,6 +111,26 @@ class ProgramRunnerTests(unittest.TestCase):
         self.assertEqual(processor.calls, [])
         self.assertEqual(result.sessions_skipped, 2)
         self.assertEqual([item.status for item in result.session_results], [SessionProcessStatus.SKIPPED] * 2)
+
+    def test_control_reconciliation_preserves_skipped_status_and_timestamp(self):
+        p = program()
+        control = FakeControl()
+        state = {"version": 1, "programs": {"root": {"sessions": {
+            "s1": {"status": "PROCESSED", "processing_version": 2, "files": {"f1": "a"}},
+            "s2": {"status": "INCOMPLETE", "processing_version": 2, "files": {"f2": "b"}},
+        }}}}
+        runner, _, _, _ = self.make_runner(state, inspection_for(p, ("a", "b")), control=control)
+        runner.run()
+        self.assertEqual(control.calls[0][1], {1: "PROCESSED", 2: "INCOMPLETE"})
+        self.assertEqual(control.calls[0][2], {})
+
+    def test_control_reconciliation_marks_processed_session(self):
+        p = program()
+        control = FakeControl()
+        runner, _, _, _ = self.make_runner(empty_state(), inspection_for(p), control=control)
+        runner.run()
+        self.assertEqual(control.calls[0][1], {1: "PROCESSED", 2: "PROCESSED"})
+        self.assertEqual(set(control.calls[0][2]), {1, 2})
 
     def test_legacy_processing_version_forces_reprocess(self):
         p = program()

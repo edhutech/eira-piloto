@@ -29,6 +29,7 @@ class PilotConfig:
     alert_version: str
     participation_coverage: SourceCoverage = SourceCoverage.UNKNOWN
     attendance_coverage: SourceCoverage = SourceCoverage.UNKNOWN
+    attendance_identity_path: str = ""
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "PilotConfig":
@@ -70,6 +71,7 @@ class PilotConfig:
             alert_version=_text(_mapping(raw.get("alerts"), "alerts").get("version", "pilot.v1"), "alerts.version"),
             participation_coverage=_coverage(_mapping(raw.get("participation"), "participation").get("coverage", "UNKNOWN")),
             attendance_coverage=_coverage(attendance.get("coverage", "UNKNOWN")),
+            attendance_identity_path=str(attendance.get("identity_path", "")).strip(),
         )
 
     @classmethod

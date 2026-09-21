@@ -68,6 +68,8 @@ class AttendanceModule:
         observations: list[Observation] = []
         for participant_external_id, session_external_id in pairs:
             participant = self.participant_resolver.resolve(participant_external_id)
+            if participant.status is ResolutionStatus.IGNORED:
+                continue
             session = self.session_resolver.resolve(session_external_id)
             if participant.status is not ResolutionStatus.RESOLVED or not participant.internal_id:
                 issues.append(ModuleIssue(ModuleIssueStatus.NEEDS_REVIEW, "PARTICIPANT_NOT_RESOLVED",

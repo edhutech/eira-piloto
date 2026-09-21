@@ -22,6 +22,7 @@ from ..application.session_processor import SessionProcessor
 from ..adapters.google.sheets.session_results import GoogleSheetsSessionResultsGateway, SessionResultsRepository
 from ..adapters.google.sheets.follow_up import (ControlRepository, FollowUpRepository,
                                     GoogleSheetsFollowUpGateway)
+from ..adapters.google.sheets.control import GoogleSheetsControlRepository
 from ..application.events import ApplicationEvent
 from ..application.notifications import notify_events
 from ..addons.follow_up.addon import IndividualFollowUpAddon
@@ -114,7 +115,8 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             dependencies[program_id] = ProgramDependencies(
                 processor, participant_repository, session_results_repository, ranking_repository,
                 tracking_repository,
-                (IndividualFollowUpAddon(follow_up_repository, program.sessions),))
+                (IndividualFollowUpAddon(follow_up_repository, program.sessions),),
+                GoogleSheetsControlRepository(sheets, program.sheet_id))
         return dependencies[program_id]
 
     return ProgramRunner(

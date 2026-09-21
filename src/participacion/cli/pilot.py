@@ -9,6 +9,7 @@ from typing import Any
 
 from ..adapters.google.bootstrap import get_google_services
 from ..adapters.pilot.google_participation_source import ReadOnlyGoogleParticipationSource, build_participant_resolver
+from ..application.attendance_identity import load_attendance_identity_policy
 from ..adapters.tabular.xlsx_reader import read_xlsx_table
 from ..application.pilot.config import PilotConfig
 from ..application.pilot.outcomes import OutcomeMapping, map_outcomes
@@ -37,7 +38,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("processing_statuses debe ser un objeto")
         google_source = ReadOnlyGoogleParticipationSource(sheets, config.google_sheet_id, statuses)
         participants = google_source.participants()
-        participant_resolver = build_participant_resolver(participants)
+        participant_resolver: Any = build_participant_resolver(participants)
+        if config.attendance_identity_path:
+            identity_path = _resolve_local_path(args.config, config.attendance_identity_path)
+            participant_resolver = load_attendance_identity_policy(identity_path, participant_resolver)
         session_orders = {item.session_id: item.session_order for item in config.session_mapping.values()}
         applicability = RosterApplicabilityResolver(participants, session_orders)
         table = read_xlsx_table(attendance_path, sheet_name=str(attendance_source.get("sheet", "")))

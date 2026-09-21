@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
 
 from ..core.models import ProgramInspection, ProgramRecord, SessionInspection
@@ -20,6 +21,7 @@ class ProgramDependencies:
     ranking_repository: Any
     tracking_repository: Any | None = None
     addons: Sequence[ProgramAddon] = ()
+    control_repository: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +121,21 @@ class ProgramRunner:
             warnings.extend(outcome.warnings)
             errors.extend(outcome.errors)
 
+        session_statuses = {
+            session.session_number: sessions_state[session.state_key]["status"]
+            for session in program.sessions if session.state_key in sessions_state
+        }
+        if dependencies.control_repository is not None:
+            try:
+                processed_at = {
+                    item.session_number: datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    for item in session_results if item.status is not SessionProcessStatus.SKIPPED
+                }
+                dependencies.control_repository.reconcile(
+                    inspection.sessions, session_statuses, processed_at)
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+
         ranking_changed = False
         ranking_entries = 0
         try:
@@ -146,10 +163,6 @@ class ProgramRunner:
 
         addon_results: list[AddonResult] = []
         events: list[ApplicationEvent] = []
-        session_statuses = {
-            session.session_number: sessions_state[session.state_key]["status"]
-            for session in program.sessions if session.state_key in sessions_state
-        }
         for addon in dependencies.addons:
             try:
                 addon_result = addon.run(ProgramAddonContext(program, session_statuses))
