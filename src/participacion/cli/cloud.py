@@ -11,7 +11,6 @@ from typing import Any, Mapping
 
 from ..adapters.google.bootstrap import (
     SHEET_MIME,
-    _find_existing_sheet,
     execute_init,
     extract_folder_id,
     extract_spreadsheet_id,
@@ -21,6 +20,7 @@ from ..adapters.google.bootstrap import (
     validate_drive_folder,
 )
 from ..adapters.google.sheets.cloud_store import GoogleSheetsJsonStore, GoogleSheetsStateStore
+from ..adapters.google.sheets.control import GoogleSheetsControlRepository
 from ..adapters.google.sheets.participants import GoogleSheetsValuesGateway, ParticipantRepository
 from ..adapters.pilot.google_participation_source import (
     ReadOnlyGoogleParticipationSource,
@@ -194,18 +194,117 @@ def _validate_rule_lists(bundle: Mapping[str, Any]) -> None:
         attendance_identity_policy_from_rows(attendance, _Resolver())
 
 
-def _find_sheet_in_folder(drive: Any, folder_id: str, sheet_value: str = "") -> str:
+def _sheet_titles(sheets: Any, spreadsheet_id: str) -> set[str]:
+    response = sheets.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        includeGridData=False,
+        fields="sheets(properties(title))",
+    ).execute()
+    return {
+        str(item.get("properties", {}).get("title", "")).strip()
+        for item in response.get("sheets", [])
+        if str(item.get("properties", {}).get("title", "")).strip()
+    }
+
+
+def _cloud_bundle_for_sheet(
+    sheets: Any,
+    spreadsheet_id: str,
+    *,
+    folder_id: str,
+) -> Mapping[str, Any] | None:
+    titles = _sheet_titles(sheets, spreadsheet_id)
+    if "Configuración" not in titles:
+        return None
+    bundle = GoogleSheetsJsonStore(
+        sheets, spreadsheet_id, "Configuración"
+    ).get(CLOUD_BUNDLE_KEY)
+    if not isinstance(bundle, Mapping) or bundle.get("version") != CLOUD_BUNDLE_VERSION:
+        return None
+    program_raw = bundle.get("program")
+    if not isinstance(program_raw, Mapping):
+        return None
+    source = program_raw.get("source")
+    output = program_raw.get("output")
+    if not isinstance(source, Mapping) or not isinstance(output, Mapping):
+        return None
+    if str(source.get("ref", "")).strip() != folder_id:
+        return None
+    if str(output.get("ref", "")).strip() not in {"", spreadsheet_id}:
+        return None
+    return bundle
+
+
+def _find_sheet_in_folder(
+    drive: Any,
+    sheets: Any,
+    folder_id: str,
+    sheet_value: str = "",
+    *,
+    program_name: str = "",
+    allow_legacy: bool = False,
+) -> str | None:
     if sheet_value.strip():
         return extract_spreadsheet_id(sheet_value)
+
     candidates = [
         item for item in list_children(drive, folder_id)
-        if item.get("mimeType") == SHEET_MIME and str(item.get("name", "")).startswith("Participación - ")
+        if item.get("mimeType") == SHEET_MIME
     ]
-    if len(candidates) != 1:
+    cloud_matches: list[tuple[str, Mapping[str, Any]]] = []
+    for item in candidates:
+        sheet_id = str(item.get("id", "")).strip()
+        if not sheet_id:
+            continue
+        bundle = _cloud_bundle_for_sheet(sheets, sheet_id, folder_id=folder_id)
+        if bundle is not None:
+            cloud_matches.append((sheet_id, bundle))
+
+    if program_name:
+        named_cloud = [
+            sheet_id
+            for sheet_id, bundle in cloud_matches
+            if str(
+                (bundle.get("program") or {}).get("program_name", "")
+                if isinstance(bundle.get("program"), Mapping)
+                else ""
+            ).strip() == program_name
+        ]
+        if len(named_cloud) == 1:
+            return named_cloud[0]
+        if len(named_cloud) > 1:
+            raise ValueError(
+                "La carpeta contiene más de un workbook Eira para el mismo programa; usa --sheet"
+            )
+
+    if len(cloud_matches) == 1:
+        return cloud_matches[0][0]
+    if len(cloud_matches) > 1:
         raise ValueError(
-            "Se requiere --sheet cuando la carpeta no contiene exactamente un Google Sheet de Eira"
+            "La carpeta contiene más de un workbook Eira válido; usa --sheet"
         )
-    return str(candidates[0]["id"])
+
+    if not allow_legacy:
+        return None
+
+    prefix = f"Participación - {program_name}".strip()
+    legacy_matches: list[str] = []
+    required = {"Participantes", "Control", "Sesiones", "Programa"}
+    for item in candidates:
+        name = str(item.get("name", "")).strip()
+        sheet_id = str(item.get("id", "")).strip()
+        if not sheet_id or not name.startswith(prefix):
+            continue
+        titles = _sheet_titles(sheets, sheet_id)
+        if required.issubset(titles):
+            legacy_matches.append(sheet_id)
+    if len(legacy_matches) == 1:
+        return legacy_matches[0]
+    if len(legacy_matches) > 1:
+        raise ValueError(
+            "Hay más de un workbook legacy compatible para el programa; usa --sheet"
+        )
+    return None
 
 
 def setup_main(argv: list[str] | None = None) -> int:
@@ -214,6 +313,7 @@ def setup_main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--drive-folder", required=True, help="URL de la carpeta Drive donde vive Eira")
     parser.add_argument("--spec", required=True, help="JSON de setup o '-' para stdin")
+    parser.add_argument("--sheet", default="", help="URL/ID de un workbook Eira existente")
     parser.add_argument("--yes", action="store_true", help="confirma escrituras sin prompt interactivo")
     args = parser.parse_args(argv)
     try:
@@ -227,27 +327,42 @@ def setup_main(argv: list[str] | None = None) -> int:
         program_name = str(program_raw.get("program_name", "")).strip()
         if not program_name:
             raise ValueError("spec.program.program_name es obligatorio")
-        participant_mode = str(program_raw.get("participant_mode", "official")).strip()
-        if participant_mode != "official":
-            raise ValueError("El flujo cloud-first requiere participant_mode=official")
+        roster_raw = spec.get("roster")
+        if roster_raw is not None and not isinstance(roster_raw, Mapping):
+            raise ValueError("spec.roster debe ser un objeto cuando se configura")
+        default_mode = "official" if isinstance(roster_raw, Mapping) else "auto"
+        participant_mode = str(program_raw.get("participant_mode", default_mode)).strip()
+        if participant_mode not in {"official", "auto"}:
+            raise ValueError("El flujo cloud-first soporta participant_mode=official o auto")
+        if participant_mode == "official" and not isinstance(roster_raw, Mapping):
+            raise ValueError("participant_mode=official requiere spec.roster")
+        if participant_mode == "auto" and isinstance(roster_raw, Mapping):
+            raise ValueError("Un roster vivo requiere participant_mode=official")
 
         folder_id = extract_folder_id(args.drive_folder)
         drive, sheets = get_google_services()
         metadata = validate_drive_folder(drive, folder_id)
-        roster_raw = spec.get("roster")
-        if not isinstance(roster_raw, Mapping):
-            raise ValueError("spec.roster debe apuntar al roster oficial vivo")
-        records, _ = _roster_records(sheets, roster_raw)
-        participants = roster_records_to_participants(records, "google_sheets:live_roster")
-        children = list_children(drive, folder_id)
-        existing_sheet_id = _find_existing_sheet(children, f"Participación - {program_name}")
+        participants: list[dict[str, str]] = []
+        if isinstance(roster_raw, Mapping):
+            records, _ = _roster_records(sheets, roster_raw)
+            participants = roster_records_to_participants(
+                records, "google_sheets:live_roster"
+            )
+        existing_sheet_id = _find_sheet_in_folder(
+            drive,
+            sheets,
+            folder_id,
+            args.sheet,
+            program_name=program_name,
+            allow_legacy=True,
+        )
         plan = build_plan(
             program_name=program_name,
             current_folder_name=program_name,  # cloud-first: no renombrar la carpeta del usuario
             folder_id=folder_id,
             folder_url=args.drive_folder,
             session_count=len(sessions),
-            participant_mode="official",
+            participant_mode=participant_mode,
             imported_participants=participants,
             existing_children={},
             existing_sheet_id=existing_sheet_id,
@@ -255,7 +370,10 @@ def setup_main(argv: list[str] | None = None) -> int:
         )
         print(f"Programa: {program_name}")
         print(f"Carpeta Drive: {args.drive_folder}")
-        print(f"Participantes oficiales detectados: {len(participants)}")
+        if participant_mode == "official":
+            print(f"Participantes oficiales detectados: {len(participants)}")
+        else:
+            print("Roster externo: no configurado (modo auto)")
         print(f"Sesiones configuradas: {len(sessions)}")
         if not args.yes:
             answer = input("¿Confirmas crear/actualizar la configuración cloud de Eira? [s/N] ")
@@ -269,15 +387,20 @@ def setup_main(argv: list[str] | None = None) -> int:
             spec.get("pilot") if isinstance(spec.get("pilot"), Mapping) else None,
             record,
         )
-        bundle = {
+        bundle: dict[str, Any] = {
             "version": CLOUD_BUNDLE_VERSION,
             "program": record,
-            "roster": dict(roster_raw),
             "pilot": pilot,
             "known_external": list(spec.get("known_external", [])),
             "attendance_identity": list(spec.get("attendance_identity", [])),
         }
+        if isinstance(roster_raw, Mapping):
+            bundle["roster"] = dict(roster_raw)
         _validate_rule_lists(bundle)
+        configured_program = program_from_dict(record)
+        GoogleSheetsControlRepository(
+            sheets, record["output"]["ref"]
+        ).ensure_sessions(configured_program.sessions)
         config_store = GoogleSheetsJsonStore(sheets, record["output"]["ref"], "Configuración")
         state_store = GoogleSheetsStateStore(
             GoogleSheetsJsonStore(sheets, record["output"]["ref"], "Estado")
@@ -377,7 +500,11 @@ def run_main(argv: list[str] | None = None) -> int:
         folder_id = extract_folder_id(args.drive_folder)
         drive, sheets, _ = get_google_services_with_docs()
         validate_drive_folder(drive, folder_id)
-        sheet_id = _find_sheet_in_folder(drive, folder_id, args.sheet)
+        sheet_id = _find_sheet_in_folder(drive, sheets, folder_id, args.sheet)
+        if sheet_id is None:
+            raise ValueError(
+                "No se encontró un workbook Eira válido en la carpeta; ejecuta eira-setup"
+            )
         config_store = GoogleSheetsJsonStore(sheets, sheet_id, "Configuración")
         bundle = config_store.get(CLOUD_BUNDLE_KEY)
         if not isinstance(bundle, Mapping) or bundle.get("version") != CLOUD_BUNDLE_VERSION:
@@ -387,15 +514,25 @@ def run_main(argv: list[str] | None = None) -> int:
         program_raw = bundle.get("program")
         roster_raw = bundle.get("roster")
         pilot_raw = bundle.get("pilot")
-        if not isinstance(program_raw, Mapping) or not isinstance(roster_raw, Mapping):
-            raise ValueError("Configuración cloud incompleta: program/roster")
+        if not isinstance(program_raw, Mapping):
+            raise ValueError("Configuración cloud incompleta: program")
+        if roster_raw is not None and not isinstance(roster_raw, Mapping):
+            raise ValueError("Configuración cloud inválida: roster")
         if not isinstance(pilot_raw, Mapping):
             raise ValueError("Configuración cloud incompleta: pilot")
         program = program_from_dict(program_raw)
         if program.output.ref != sheet_id or program.source.ref != folder_id:
             raise ValueError("La configuración cloud no corresponde a la carpeta/Sheet solicitado")
+        if program.participant_mode == "official" and not isinstance(roster_raw, Mapping):
+            raise ValueError("Programa official sin roster cloud configurado")
 
-        roster_result = _refresh_live_roster(sheets, sheet_id, roster_raw)
+        if isinstance(roster_raw, Mapping):
+            roster_result: Mapping[str, Any] = _refresh_live_roster(
+                sheets, sheet_id, roster_raw
+            )
+        else:
+            roster_result = {"mode": "auto", "source": "session_evidence"}
+        GoogleSheetsControlRepository(sheets, sheet_id).ensure_sessions(program.sessions)
         state_store = GoogleSheetsStateStore(
             GoogleSheetsJsonStore(sheets, sheet_id, "Estado")
         )
