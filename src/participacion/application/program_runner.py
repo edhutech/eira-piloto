@@ -104,6 +104,14 @@ class ProgramRunner:
         errors: list[str] = []
         for session_inspection in sorted(inspection.sessions, key=lambda item: item.session.session_number):
             session_id = session_inspection.session.state_key
+            if (session_inspection.session.planned and
+                    not session_inspection.session.evidence_sources and
+                    not session_inspection.session.source_ref):
+                session_results.append(SessionProcessResult(
+                    session_number=session_inspection.session.session_number,
+                    status=SessionProcessStatus.SKIPPED,
+                ))
+                continue
             previous = sessions_state.get(session_id, {})
             decision = self._decision(session_inspection, previous)
             if not decision.process:

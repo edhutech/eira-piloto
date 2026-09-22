@@ -36,10 +36,11 @@ from ..application.pilot.config import PilotConfig
 from ..application.pilot.config import validate_session_mapping
 from ..application.pilot.runner import PilotRunner, PilotSources, RosterApplicabilityResolver
 from ..application.external_data.mapping import MappingStatus, map_table
+from ..application.modules.resolution import ParticipantResolverAdapter, ResolutionStatus
 from ..application.pilot.operational import build_operational_view
 from ..application.registry import program_from_dict, save_programs
 from ..application.roster import RosterImporter, RosterRecord, roster_records_from_rows, roster_records_to_participants
-from ..core.participants import Participant
+from ..core.participants import Participant, ParticipantResolver
 from .main import _print_results, _sheet_ids, build_runner
 from .pilot import _read_attendance_table
 
@@ -619,9 +620,16 @@ def setup_main(argv: list[str] | None = None) -> int:
                 _validate_alias_source(sheets, attendance_raw)
                 attendance_identity_rows.extend(_live_alias_rows(sheets, pilot))
             if participant_mode == "auto":
+                validation_participants: list[Any] = list(participants)
+                if not validation_participants and existing_sheet_id:
+                    ids = _sheet_ids(sheets, existing_sheet_id)
+                    validation_participants = list(ParticipantRepository(
+                        GoogleSheetsValuesGateway(
+                            sheets, existing_sheet_id, "Participantes", ids.get("Participantes")
+                        )
+                    ).load_read_only())
                 _validate_auto_attendance_resolution(
-                    sheets, attendance_raw, attendance_identity_rows,
-                    attendance_table, mapping_result,
+                    attendance_identity_rows, mapping_result, validation_participants,
                 )
         candidate_bundle: dict[str, Any] = {
             "version": CLOUD_BUNDLE_VERSION,
@@ -755,12 +763,23 @@ def _validate_alias_source(sheets: Any, attendance_raw: Mapping[str, Any]) -> No
 
 
 def _validate_auto_attendance_resolution(
-    sheets: Any, attendance_raw: Mapping[str, Any], identity_rows: list[Mapping[str, Any]],
-    attendance_table: Any, mapping_result: Any,
+    identity_rows: list[Mapping[str, Any]], mapping_result: Any,
+    participants: list[Any],
 ) -> None:
-    """Require every auto participant in Attendance to have an explicit route."""
+    """Require every auto Attendance identity to resolve to an existing participant."""
+    if not participants:
+        raise ValueError(
+            "Attendance en modo auto requiere participantes existentes y una política resoluble"
+        )
     if not identity_rows:
         raise ValueError("Attendance en modo auto requiere una política de identidad resoluble")
+    records: list[dict[str, Any]] = []
+    for item in participants:
+        records.append(dict(item) if isinstance(item, Mapping) else vars(item))
+    resolver = ParticipantResolverAdapter(
+        ParticipantResolver.official(records), match_email=True
+    )
+    policy = attendance_identity_policy_from_rows(identity_rows, resolver)
     mapped = {
         str(row.get("external_id", "") or "").strip().casefold()
         for row in identity_rows
@@ -775,6 +794,12 @@ def _validate_auto_attendance_resolution(
         raise ValueError(
             "Attendance en modo auto tiene participantes sin mapping de identidad explícito"
         )
+    for external_id in sorted(observed):
+        result = policy.resolve(external_id)
+        if result.status is not ResolutionStatus.RESOLVED:
+            raise ValueError(
+                "Attendance en modo auto tiene una identidad no resoluble: " + external_id
+            )
 
 
 def _write_known_external_csv(path: Path, rows: list[Mapping[str, Any]]) -> None:

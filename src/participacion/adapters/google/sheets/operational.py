@@ -55,13 +55,14 @@ class GoogleSheetsOperationalRepository:
         return "NOOP" if statuses == ("NOOP", "NOOP") else "REPLACE"
 
     def _replace(self, sheet_name: str, values: list[list[Any]], volatile_column: int | None = None) -> str:
+        """Replace a sheet, ignoring one zero-based volatile column if supplied."""
         existing = self._read(sheet_name)
         comparable_existing = existing
         comparable_values = values
         if volatile_column is not None:
-            comparable_existing = [row[:volatile_column - 1] + row[volatile_column:]
+            comparable_existing = [row[:volatile_column] + row[volatile_column + 1:]
                                    for row in existing]
-            comparable_values = [row[:volatile_column - 1] + row[volatile_column:]
+            comparable_values = [row[:volatile_column] + row[volatile_column + 1:]
                                  for row in values]
         if comparable_existing == comparable_values:
             return "NOOP"

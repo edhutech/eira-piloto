@@ -157,7 +157,7 @@ class SessionInspection:
 
     @property
     def requires_processing(self) -> bool:
-        return bool(not self.files and (self.session.planned or self.session.evidence_sources or self.session.source_ref)) or any(
+        return bool(not self.files and (self.session.evidence_sources or self.session.source_ref)) or any(
             change.status != FileStatus.UNCHANGED for change in self.changes
         )
 

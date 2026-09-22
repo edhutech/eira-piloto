@@ -8,14 +8,20 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from participacion.adapters.google.sheets.operational import GoogleSheetsOperationalRepository
+from participacion.adapters.google.sheets.operational import OPERATIONAL_HEADERS
+from participacion.adapters.pilot.google_participation_source import build_participant_resolver
 from participacion.application.init_program import build_plan
-from participacion.application.pilot.operational import build_operational_view
+from participacion.application.pilot.config import PilotConfig
+from participacion.application.pilot.operational import OperationalView, build_operational_view
+from participacion.application.pilot.runner import PilotRunner, PilotSources
 from participacion.application.pilot.results import HistoricalSnapshot, PilotResult
 from participacion.application.program_runner import ProgramDependencies, ProgramRunner
 from participacion.application.session_processor import SessionProcessResult, SessionProcessStatus
 from participacion.core.alerts import Alert, AlertEvaluationStatus, AlertLevel
 from participacion.core.models import FileChange, FileStatus, ProgramInspection, ProgramRecord, ProviderRef, SessionInspection, SessionRecord, SourceArtifact
 from participacion.core.observation import Observation, ObservationStatus
+from participacion.core.participants import Participant
+from participacion.core.scoring import ParticipantSessionScore
 from participacion.core.signals import Signal, SignalSet
 
 
@@ -77,6 +83,60 @@ class OperationalFlowTests(unittest.TestCase):
         ), (), ())
         self.assertEqual(build_operational_view(result).as_of_session_id, "S01")
 
+    def test_program_runner_skips_unreached_planned_sessions_before_pilot(self):
+        sessions = (
+            SessionRecord(1, "S01", "folder-1", "S01"),
+            SessionRecord(2, "S02", "", "S02", planned=True),
+            SessionRecord(3, "S03", "", "S03", planned=True),
+        )
+        program = ProgramRecord("p", "Demo", 3, "auto", ProviderRef("google_drive", "root"),
+                                ProviderRef("google_sheets", "sheet"), sessions)
+        artifact = SourceArtifact("a", "transcript")
+        inspection = ProgramInspection(program, [
+            SessionInspection(sessions[0], [artifact], [FileChange(artifact, FileStatus.NEW, "fp")]),
+            SessionInspection(sessions[1]), SessionInspection(sessions[2]),
+        ])
+        processor = MagicMock()
+        processor.process.return_value = SessionProcessResult(1, SessionProcessStatus.PROCESSED)
+        dependencies = ProgramDependencies(
+            processor, MagicMock(), MagicMock(), MagicMock(), enable_legacy_tracking=False,
+            enable_legacy_addons=False,
+        )
+        state = {"version": 1, "programs": {}}
+        store = SimpleNamespace(load=lambda: state, save=lambda value: state.update(value))
+        result = ProgramRunner(
+            {"p": program}, object(), lambda _id, _program: dependencies, store,
+            lambda *_args: [inspection],
+        ).run("p")[0]
+        self.assertEqual([item.status for item in result.session_results], [
+            SessionProcessStatus.PROCESSED, SessionProcessStatus.SKIPPED, SessionProcessStatus.SKIPPED,
+        ])
+        processor.process.assert_called_once()
+
+        config = PilotConfig.from_dict({
+            "program": {"program_id": "p", "program_name": "Demo", "sheet_id": "sheet"},
+            "participation": {"coverage": "UNKNOWN"},
+            "session_mapping": {
+                "1": {"session_id": "S01", "session_order": 1},
+                "2": {"session_id": "S02", "session_order": 2},
+                "3": {"session_id": "S03", "session_order": 3},
+            },
+            "longitudinal": {"minimum_observations": 1, "recent_window_size": 1, "trend_threshold": 0},
+            "signals": {"version": "pilot.v1", "participation_silence_streak": {"enabled": True, "minimum_streak": 2}},
+            "alerts": {"version": "pilot.v1", "silence_level": "OBSERVAR"},
+        })
+        pilot_result = PilotRunner(
+            config,
+            PilotSources(
+                lambda: (ParticipantSessionScore(1, "p1", 1, 1, 0, 0, 0, Decimal("1"), True),),
+                None,
+                build_participant_resolver([Participant("p1", "Synthetic", "p1@example.test")]),
+                participant_ids=lambda: ["p1"],
+                participation_statuses=lambda: {"1": "PROCESSED"},
+            ),
+        ).run()
+        self.assertEqual(build_operational_view(pilot_result).as_of_session_id, "S01")
+
     def test_operational_repository_uses_observations_not_manual_tracking(self):
         observation = Observation("p1", "S01", "attendance", "attendance_ratio", Decimal("0.8"),
                                   ObservationStatus.OBSERVED)
@@ -90,6 +150,30 @@ class OperationalFlowTests(unittest.TestCase):
         writes = repository.service.values_api.writes
         summary_update = next(item for item in writes if item[0] == "update" and "Seguimiento'!A1" in item[1]["range"])
         self.assertEqual(summary_update[1]["body"]["values"][5][1], 1)
+
+    def test_operational_repository_ignores_only_updated_at_for_noop(self):
+        def summary(as_of: str, updated_at: str):
+            return [
+                ["metric", "value", "as_of_session", "updated_at"],
+                ["NORMAL", 0, as_of, updated_at],
+                ["OBSERVAR", 0, as_of, updated_at],
+                ["INSUFFICIENT_DATA", 0, as_of, updated_at],
+                ["participants_evaluated", 0, as_of, updated_at],
+                ["attendance_observed_count", 0, as_of, updated_at],
+            ]
+
+        service = MagicMock()
+        repository = GoogleSheetsOperationalRepository(service, "sheet", MagicMock())
+        repository._read = MagicMock(side_effect=[
+            [], [], summary("S03", "10:00"), [OPERATIONAL_HEADERS],
+            summary("S03", "10:00"), [OPERATIONAL_HEADERS],
+        ])
+        view1 = OperationalView("S03", 3, (), {}, 0, "10:00")
+        view2 = OperationalView("S03", 3, (), {}, 0, "10:05")
+        view3 = OperationalView("S04", 4, (), {}, 0, "10:10")
+        self.assertEqual(repository.persist(view1), "REPLACE")
+        self.assertEqual(repository.persist(view2), "NOOP")
+        self.assertEqual(repository.persist(view3), "REPLACE")
 
     def test_cloud_dependencies_disable_legacy_views_and_addons(self):
         tracking = MagicMock()
