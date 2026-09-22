@@ -44,7 +44,9 @@ class GoogleSheetsOperationalRepository:
         summary = [["metric", "value", "as_of_session", "updated_at"],
                    *[[key, value, view.as_of_session_id, view.generated_at]
                      for key, value in view.summary().items()],
-                   ["participants_evaluated", len(view.cases), view.as_of_session_id, view.generated_at],
+                   ["participants_evaluated",
+                    sum(case.evaluation_status == "EVALUATED" for case in view.cases),
+                    view.as_of_session_id, view.generated_at],
                    ["attendance_observed_count", view.attendance_observed_count, view.as_of_session_id, view.generated_at],
                    *[[f"signal:{key}", value, view.as_of_session_id, view.generated_at]
                      for key, value in sorted(view.signal_counts.items())]]

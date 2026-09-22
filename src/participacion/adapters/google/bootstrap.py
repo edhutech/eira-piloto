@@ -132,8 +132,12 @@ def list_children(drive: Any, folder_id: str) -> list[dict[str, Any]]:
 
 
 def _find_existing_sheet(children: list[dict[str, Any]], title: str) -> str | None:
-    return next((item["id"] for item in children
-                 if item.get("name") == title and item.get("mimeType") == SHEET_MIME), None)
+    compatible_titles = {title, f"{title} - Eira Piloto"}
+    matches = [item["id"] for item in children
+               if item.get("name") in compatible_titles and item.get("mimeType") == SHEET_MIME]
+    if len(matches) > 1:
+        raise ValueError("Hay más de un workbook compatible; requiere desambiguación")
+    return matches[0] if matches else None
 
 
 def _confirm(prompt: str = "¿Confirmas realizar todas las escrituras? [s/N] ") -> bool:
@@ -313,9 +317,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         record = execute_init(plan, drive, sheets, metadata)
         print(json.dumps(record, ensure_ascii=False, indent=2))
+        print("RESULT: SUCCESS — Eira setup completed successfully.")
         return 0
     except (ValueError, RuntimeError, OSError, KeyError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 

@@ -16,11 +16,7 @@ classifiers = [
     "Intended Audience :: Education",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
 ]
 urls = {Homepage = "https://github.com/edhutech/eira-piloto", Repository = "https://github.com/edhutech/eira-piloto"}
 dependencies = []

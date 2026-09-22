@@ -294,7 +294,7 @@ class CloudNoRosterFlowTests(unittest.TestCase):
             patch("participacion.cli.cloud.GoogleSheetsControlRepository", return_value=control),
             patch("participacion.cli.cloud.GoogleSheetsJsonStore", return_value=json_store),
             patch("participacion.cli.cloud.GoogleSheetsStateStore", return_value=state_store),
-            redirect_stdout(io.StringIO()),
+            redirect_stdout(output := io.StringIO()),
         ):
             self.assertEqual(
                 setup_main([
@@ -307,6 +307,7 @@ class CloudNoRosterFlowTests(unittest.TestCase):
         written_bundle = json_store.put.call_args.args[1]
         self.assertNotIn("roster", written_bundle)
         self.assertEqual(written_bundle["program"]["participant_mode"], "auto")
+        self.assertIn("RESULT: SUCCESS", output.getvalue())
 
     def test_run_recovers_auto_program_without_roster(self):
         program = {
@@ -366,6 +367,57 @@ class CloudNoRosterFlowTests(unittest.TestCase):
             )
         control.ensure_sessions.assert_called_once()
         runner.run.assert_called_once_with("root")
+
+    def test_run_reports_cleanup_failure_as_terminal_error(self):
+        program = {
+            "program_id": "root", "program_name": "Demo", "session_count": 1,
+            "participant_mode": "auto",
+            "source": {"provider": "google_drive", "ref": "root", "metadata": {}},
+            "output": {"provider": "google_sheets", "ref": "sheet"},
+            "sessions": [{"session_number": 1, "session_name": "S01", "source_ref": "folder-1"}],
+        }
+        bundle = {"version": CLOUD_BUNDLE_VERSION, "program": program,
+                  "pilot": {"program": {"program_id": "root", "program_name": "Demo", "sheet_id": "sheet"}},
+                  "known_external": [], "attendance_identity": []}
+        config_store = MagicMock(get=MagicMock(return_value=bundle))
+        lease = MagicMock()
+        lease.release.side_effect = RuntimeError("synthetic cleanup failure")
+        state_store = MagicMock(acquire_lease=MagicMock(return_value=lease))
+        runner = MagicMock()
+        runner.run.return_value = []
+        output = io.StringIO()
+        error = io.StringIO()
+        with (
+            patch("participacion.cli.cloud.extract_folder_id", return_value="root"),
+            patch("participacion.cli.cloud.get_google_services_with_docs", return_value=(object(), object(), object())),
+            patch("participacion.cli.cloud.validate_drive_folder", return_value={}),
+            patch("participacion.cli.cloud._find_sheet_in_folder", return_value="sheet"),
+            patch("participacion.cli.cloud.GoogleSheetsJsonStore", return_value=config_store),
+            patch("participacion.cli.cloud.GoogleSheetsStateStore", return_value=state_store),
+            patch("participacion.cli.cloud.GoogleSheetsControlRepository"),
+            patch("participacion.cli.cloud.build_runner", return_value=runner),
+            redirect_stdout(output),
+            patch("sys.stderr", error),
+        ):
+            result = run_main([
+                "--drive-folder", "https://drive.google.com/drive/folders/root",
+                "--sync-only",
+            ])
+            runner.run.side_effect = RuntimeError("synthetic original failure")
+            output.seek(0)
+            output.truncate()
+            error.seek(0)
+            error.truncate()
+            result_with_original_error = run_main([
+                "--drive-folder", "https://drive.google.com/drive/folders/root",
+                "--sync-only",
+            ])
+        self.assertEqual(result, 1)
+        self.assertNotIn("RESULT: SUCCESS", output.getvalue())
+        self.assertIn("lease cleanup failed", error.getvalue())
+        self.assertEqual(result_with_original_error, 1)
+        self.assertIn("synthetic original failure", error.getvalue())
+        self.assertIn("lease cleanup failed", error.getvalue())
 
 
 if __name__ == "__main__":

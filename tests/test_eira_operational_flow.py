@@ -12,7 +12,7 @@ from participacion.adapters.google.sheets.operational import OPERATIONAL_HEADERS
 from participacion.adapters.pilot.google_participation_source import build_participant_resolver
 from participacion.application.init_program import build_plan
 from participacion.application.pilot.config import PilotConfig
-from participacion.application.pilot.operational import OperationalView, build_operational_view
+from participacion.application.pilot.operational import OperationalCase, OperationalView, build_operational_view
 from participacion.application.pilot.runner import PilotRunner, PilotSources
 from participacion.application.pilot.results import HistoricalSnapshot, PilotResult
 from participacion.application.program_runner import ProgramDependencies, ProgramRunner
@@ -150,6 +150,26 @@ class OperationalFlowTests(unittest.TestCase):
         writes = repository.service.values_api.writes
         summary_update = next(item for item in writes if item[0] == "update" and "Seguimiento'!A1" in item[1]["range"])
         self.assertEqual(summary_update[1]["body"]["values"][5][1], 1)
+
+    def test_operational_repository_counts_only_evaluated_participants(self):
+        cases = tuple(
+            OperationalCase(f"p{i}", "S01", 1, status, None, (), {}, "v1")
+            for i, status in enumerate(("EVALUATED", "EVALUATED", "INSUFFICIENT_DATA"), 1)
+        )
+        view = OperationalView("S01", 1, cases, {}, 0, "10:00")
+        repository = GoogleSheetsOperationalRepository(_Sheets(), "sheet", MagicMock())
+
+        repository.persist(view)
+
+        summary_update = next(
+            item for item in repository.service.values_api.writes
+            if item[0] == "update" and "Seguimiento'!A1" in item[1]["range"]
+        )
+        participants_row = next(
+            row for row in summary_update[1]["body"]["values"]
+            if row[0] == "participants_evaluated"
+        )
+        self.assertEqual(participants_row[1], 2)
 
     def test_operational_repository_ignores_only_updated_at_for_noop(self):
         def summary(as_of: str, updated_at: str):

@@ -689,9 +689,10 @@ def setup_main(argv: list[str] | None = None) -> int:
             "cloud_config": True,
             "cloud_state": True,
         }, ensure_ascii=False, indent=2))
+        print("RESULT: SUCCESS — Eira setup completed successfully.")
         return 0
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 
@@ -823,6 +824,8 @@ def run_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sync-only", action="store_true")
     args = parser.parse_args(argv)
     lease = None
+    exit_code = 1
+    flow_succeeded = False
     try:
         folder_id = extract_folder_id(args.drive_folder)
         drive, sheets, _ = get_google_services_with_docs()
@@ -889,67 +892,66 @@ def run_main(argv: list[str] | None = None) -> int:
 
             if args.sync_only:
                 print(json.dumps({"roster": roster_result, "pilot": "SKIPPED"}, ensure_ascii=False))
-                print("RESULT: SUCCESS — Participation sync completed successfully.")
-                return 0
-
-            pilot = PilotConfig.from_dict(pilot_raw)
-            validate_session_mapping(pilot, program)
-            google_source = ReadOnlyGoogleParticipationSource(sheets, sheet_id, {})
-            participants = google_source.participants()
-            participant_resolver: Any = build_participant_resolver(participants)
-            identity_rows = list(bundle.get("attendance_identity", []))
-            identity_rows.extend(_live_alias_rows(sheets, pilot_raw))
-            if identity_rows:
-                participant_resolver = attendance_identity_policy_from_rows(
-                    identity_rows, participant_resolver
+                flow_succeeded = True
+            else:
+                pilot = PilotConfig.from_dict(pilot_raw)
+                validate_session_mapping(pilot, program)
+                google_source = ReadOnlyGoogleParticipationSource(sheets, sheet_id, {})
+                participants = google_source.participants()
+                participant_resolver: Any = build_participant_resolver(participants)
+                identity_rows = list(bundle.get("attendance_identity", []))
+                identity_rows.extend(_live_alias_rows(sheets, pilot_raw))
+                if identity_rows:
+                    participant_resolver = attendance_identity_policy_from_rows(
+                        identity_rows, participant_resolver
+                    )
+                if (program.participant_mode == "auto" and pilot.attendance_mapping is not None
+                        and not identity_rows):
+                    raise ValueError(
+                        "Attendance en modo auto requiere una política de identidad explícita"
+                    )
+                session_orders = {
+                    item.session_id: item.session_order for item in pilot.session_mapping.values()
+                }
+                applicability = RosterApplicabilityResolver(participants, session_orders)
+                attendance_table = None
+                if pilot.attendance_source is not None:
+                    table = _read_attendance_table(
+                        temp / "cloud.json", pilot.attendance_source, sheets
+                    )
+                    attendance_table = lambda table=table: table
+                result = PilotRunner(
+                    pilot,
+                    PilotSources(
+                        google_source.scores,
+                        attendance_table,
+                        participant_resolver,
+                        applicability,
+                        participant_ids=lambda: [item.participant_id for item in participants],
+                        participation_statuses=google_source.statuses,
+                    ),
+                ).run()
+                operational_view = build_operational_view(result)
+                operational_repository = GoogleSheetsOperationalRepository(
+                    sheets, sheet_id,
+                    ParticipantRepository(GoogleSheetsValuesGateway(
+                        sheets, sheet_id, "Participantes", _sheet_ids(sheets, sheet_id).get("Participantes")))
                 )
-            if (program.participant_mode == "auto" and pilot.attendance_mapping is not None
-                    and not identity_rows):
-                raise ValueError(
-                    "Attendance en modo auto requiere una política de identidad explícita"
-                )
-            session_orders = {
-                item.session_id: item.session_order for item in pilot.session_mapping.values()
-            }
-            applicability = RosterApplicabilityResolver(participants, session_orders)
-            attendance_table = None
-            if pilot.attendance_source is not None:
-                table = _read_attendance_table(
-                    temp / "cloud.json", pilot.attendance_source, sheets
-                )
-                attendance_table = lambda table=table: table
-            result = PilotRunner(
-                pilot,
-                PilotSources(
-                    google_source.scores,
-                    attendance_table,
-                    participant_resolver,
-                    applicability,
-                    participant_ids=lambda: [item.participant_id for item in participants],
-                    participation_statuses=google_source.statuses,
-                ),
-            ).run()
-            operational_view = build_operational_view(result)
-            operational_repository = GoogleSheetsOperationalRepository(
-                sheets, sheet_id,
-                ParticipantRepository(GoogleSheetsValuesGateway(
-                    sheets, sheet_id, "Participantes", _sheet_ids(sheets, sheet_id).get("Participantes")))
-            )
-            operational_repository.persist(operational_view)
-            print(json.dumps({
-                "roster": roster_result,
-                "pilot": {
-                    "summary": operational_view.summary(),
-                    "cases": [case.to_dict() for case in operational_view.cases],
-                    "signal_counts": dict(operational_view.signal_counts),
-                    "as_of_session_id": operational_view.as_of_session_id,
-                },
-            }, ensure_ascii=False, indent=2, sort_keys=True))
-            print("RESULT: SUCCESS — Eira flow completed successfully.")
-        return 0
+                operational_repository.persist(operational_view)
+                print(json.dumps({
+                    "roster": roster_result,
+                    "pilot": {
+                        "summary": operational_view.summary(),
+                        "cases": [case.to_dict() for case in operational_view.cases],
+                        "signal_counts": dict(operational_view.signal_counts),
+                        "as_of_session_id": operational_view.as_of_session_id,
+                    },
+                }, ensure_ascii=False, indent=2, sort_keys=True))
+                flow_succeeded = True
+        exit_code = 0
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
         print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
+        exit_code = 1
     except Exception as exc:
         print(
             f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}",
@@ -958,7 +960,24 @@ def run_main(argv: list[str] | None = None) -> int:
         raise
     finally:
         if lease is not None:
-            lease.release()
+            try:
+                lease.release()
+            except Exception as cleanup_exc:
+                if flow_succeeded:
+                    print(
+                        f"RESULT: ERROR — Eira completed but cloud lease cleanup failed: {cleanup_exc}",
+                        file=sys.stderr,
+                    )
+                    exit_code = 1
+                else:
+                    print(
+                        f"WARNING: cloud lease cleanup failed after the original error: {cleanup_exc}",
+                        file=sys.stderr,
+                    )
+        if flow_succeeded and exit_code == 0:
+            print("RESULT: SUCCESS — Eira flow completed successfully.")
+
+    return exit_code
 
 
 if __name__ == "__main__":

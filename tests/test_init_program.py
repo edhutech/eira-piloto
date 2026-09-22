@@ -54,6 +54,22 @@ class InitProgramTests(unittest.TestCase):
         self.assertEqual(plan.sheet_id, "sheet-1")
         self.assertFalse(plan.create_sheet)
 
+    def test_existing_sheet_accepts_canonical_and_legacy_titles_without_duplicating(self):
+        from participacion.adapters.google.bootstrap import _find_existing_sheet
+
+        children = [
+            {"id": "sheet-1", "name": "Participación - Programa A - Eira Piloto",
+             "mimeType": "application/vnd.google-apps.spreadsheet"},
+        ]
+        self.assertEqual(_find_existing_sheet(children, "Participación - Programa A"), "sheet-1")
+        self.assertIsNone(_find_existing_sheet([], "Participación - Programa A"))
+
+        with self.assertRaisesRegex(ValueError, "más de un workbook"):
+            _find_existing_sheet(children + [
+                {"id": "sheet-2", "name": "Participación - Programa A",
+                 "mimeType": "application/vnd.google-apps.spreadsheet"},
+            ], "Participación - Programa A")
+
     def test_build_plan_marks_root_for_rename(self):
         plan = build_plan(
             program_name="Programa Nuevo",

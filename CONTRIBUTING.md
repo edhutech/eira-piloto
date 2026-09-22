@@ -1,6 +1,8 @@
 # Contributing
 
-Supported Python versions are 3.10, 3.11, 3.12, 3.13, and 3.14.
+The package declares compatibility with Python 3.10 and newer. Pilot CI
+currently validates Python 3.12 on Ubuntu; other supported Python versions are
+not continuously tested by CI.
 Create a virtual environment and install development dependencies:
 
     python -m venv .venv
