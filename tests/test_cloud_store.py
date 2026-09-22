@@ -95,6 +95,24 @@ class CloudStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicada"):
             store.load_all()
 
+    def test_json_size_limit_fails_before_write(self):
+        service = Service()
+        store = GoogleSheetsJsonStore(service, "sheet", "Configuración", max_value_bytes=10)
+        with self.assertRaisesRegex(ValueError, "límite"):
+            store.put("bundle", {"value": "too large"})
+        self.assertEqual(service.values_api.rows, [])
+
+    def test_cloud_lease_rejects_active_owner_and_releases(self):
+        service = Service()
+        state = GoogleSheetsStateStore(GoogleSheetsJsonStore(service, "sheet", "Estado"))
+        first = state.acquire_lease()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "activa"):
+                state.acquire_lease()
+        finally:
+            first.release()
+        self.assertNotIn("lease", state.load())
+
 
 if __name__ == "__main__":
     unittest.main()

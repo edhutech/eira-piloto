@@ -53,7 +53,8 @@ def _sheet_ids(sheets: Any, spreadsheet_id: str) -> dict[str, int]:
 
 def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
                  state_path: Path = DEFAULT_STATE_PATH,
-                 *, state_store: Any | None = None) -> ProgramRunner:
+                 *, state_store: Any | None = None,
+                 cloud_first: bool = False) -> ProgramRunner:
     programs = load_programs(programs_path)
     if not programs:
         def no_dependencies(program_id: str, program: Any) -> ProgramDependencies:
@@ -80,15 +81,18 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             ranking_repository = RankingRepository(
                 GoogleSheetsRankingGateway(
                     sheets, program.sheet_id, ids.get("Ranking"), "Ranking"))
-            tracking_gateway = GoogleSheetsTrackingGateway(sheets, program.sheet_id, "Seguimiento")
-            tracking_repository = TrackingRepository(
-                tracking_gateway,
-                participant_repository, session_results_repository)
             control_repository = ControlRepository(GoogleSheetsValuesGateway(
                 sheets, program.sheet_id, "Control", ids.get("Control")))
-            follow_up_repository = FollowUpRepository(
-                GoogleSheetsFollowUpGateway(sheets, program.sheet_id),
-                participant_repository, session_results_repository, control_repository)
+            tracking_repository = None
+            follow_up_repository = None
+            if not cloud_first:
+                tracking_gateway = GoogleSheetsTrackingGateway(sheets, program.sheet_id, "Seguimiento")
+                tracking_repository = TrackingRepository(
+                    tracking_gateway,
+                    participant_repository, session_results_repository)
+                follow_up_repository = FollowUpRepository(
+                    GoogleSheetsFollowUpGateway(sheets, program.sheet_id),
+                    participant_repository, session_results_repository, control_repository)
             resolver_factory: Callable[[Iterable[dict[str, Any]]], Any] | None = None
             if program.participant_mode in {"auto", "import", "official"}:
                 from ..core.participants import ParticipantResolver
@@ -116,8 +120,10 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
             dependencies[program_id] = ProgramDependencies(
                 processor, participant_repository, session_results_repository, ranking_repository,
                 tracking_repository,
-                (IndividualFollowUpAddon(follow_up_repository, program.sessions),),
-                GoogleSheetsControlRepository(sheets, program.sheet_id))
+                () if cloud_first else (IndividualFollowUpAddon(follow_up_repository, program.sessions),),
+                GoogleSheetsControlRepository(sheets, program.sheet_id),
+                enable_legacy_tracking=not cloud_first,
+                enable_legacy_addons=not cloud_first)
         return dependencies[program_id]
 
     return ProgramRunner(

@@ -70,6 +70,12 @@ class EvidenceSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "conflicto"):
             resolve_evidence_sources_with_context(drive, sources)
 
+    def test_container_without_type_preserves_parser_autodetection(self):
+        drive = FakeDrive({"session": [artifact("transcript"), artifact("chat")]}, {})
+        sources = (EvidenceSourceRef("google_drive", "container", "session"),)
+        resolved = resolve_evidence_sources_with_context(drive, sources)
+        self.assertEqual([item.evidence_context for item in resolved], [None, None])
+
 
 if __name__ == "__main__":
     unittest.main()

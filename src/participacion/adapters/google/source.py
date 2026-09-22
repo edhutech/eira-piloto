@@ -95,6 +95,9 @@ def classify_changes(files: Iterable[SourceArtifact], previous: dict[str, str]) 
 def inspect_program(drive: Any, program: ProgramRecord, state: dict[str, Any], program_id: str) -> ProgramInspection:
     inspections = []
     for session in program.sessions:
+        if session.planned and not session.evidence_sources and not session.source_ref:
+            inspections.append(SessionInspection(session=session, files=[], changes=[]))
+            continue
         sources = session.evidence_sources or (EvidenceSourceRef("google_drive", "container", session.source_ref),)
         resolved = (resolve_evidence_sources_with_context(drive, sources)
                     if session.evidence_sources else
@@ -102,10 +105,22 @@ def inspect_program(drive: Any, program: ProgramRecord, state: dict[str, Any], p
         files = [item.artifact for item in resolved]
         evidence_contexts = {item.artifact.artifact_id: item.evidence_context
                              for item in resolved if item.evidence_context is not None}
+        context_counts: dict[str, int] = {}
+        for item in resolved:
+            if item.evidence_context is not None:
+                context_counts[item.evidence_context.evidence_type] = context_counts.get(
+                    item.evidence_context.evidence_type, 0
+                ) + 1
+        discovery_status = "NEEDS_REVIEW" if any(count > 1 for count in context_counts.values()) else None
         previous = _stored_files(state, program_id, session.state_key)
         inspections.append(SessionInspection(session=session, files=files,
                                              changes=classify_changes(files, previous),
-                                             evidence_contexts=evidence_contexts))
+                                             evidence_contexts=evidence_contexts,
+                                             discovery_status=discovery_status,
+                                             auto_discovery=any(
+                                                 source.kind == "container" and source.evidence_type is None
+                                                 for source in sources
+                                             )))
     return ProgramInspection(program=program, sessions=inspections)
 
 

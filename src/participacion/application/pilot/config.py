@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from ..external_data.mapping import ExternalDataMapping
 from ..modules.models import SourceCoverage
 from ...core.longitudinal import LongitudinalConfig
+from ...core.models import ProgramRecord
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,20 @@ class PilotConfig:
             "signals": {"version": self.signal_version, "participation_silence_streak": {"enabled": self.silence_enabled, "minimum_streak": self.silence_minimum_streak}},
             "alerts": {"version": self.alert_version, "silence_level": "OBSERVAR"},
         }
+
+
+def validate_session_mapping(config: PilotConfig | Mapping[str, Any], program: ProgramRecord) -> None:
+    """Ensure Pilot uses ProgramRecord.sessions as its canonical session list."""
+    pilot = config if isinstance(config, PilotConfig) else PilotConfig.from_dict(config)
+    canonical = {session.session_id: session.session_number for session in program.sessions}
+    mapped_ids = [entry.session_id for entry in pilot.session_mapping.values()]
+    if len(mapped_ids) != len(set(mapped_ids)):
+        raise ValueError("Pilot session_mapping contiene session_id duplicados")
+    if set(mapped_ids) != set(canonical):
+        raise ValueError("Pilot session_mapping no coincide con ProgramRecord.sessions")
+    for entry in pilot.session_mapping.values():
+        if canonical[entry.session_id] != entry.session_order:
+            raise ValueError(f"session_order incoherente para {entry.session_id}")
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:

@@ -101,11 +101,21 @@ class ParticipationModule:
                 continue
             score: ParticipantSessionScore | None = indexed.get((participant_id, session_number))
             provenance = (ObservationProvenance(self.config.source_id, f"session:{session_id}/participant:{participant_id}"),)
+            explicit_status = (session_statuses or {}).get(str(session_number), "")
             if applicability.status is ApplicabilityStatus.NOT_APPLICABLE:
                 observations.extend(self._observations(participant_id, session_id, None,
                                                        ObservationStatus.NOT_APPLICABLE, provenance))
+            elif explicit_status in {"INCOMPLETE", "NEEDS_REVIEW", "FAILED"}:
+                status = (ObservationStatus.INCOMPLETE if explicit_status == "INCOMPLETE"
+                          else ObservationStatus.NO_DATA)
+                observations.extend(self._observations(participant_id, session_id, None, status, provenance))
+                issues.append(ModuleIssue(
+                    ModuleIssueStatus.NEEDS_REVIEW,
+                    f"SESSION_{explicit_status}",
+                    f"La sesión tiene estado explícito {explicit_status}; no se consume score histórico",
+                    participant_id, session_id,
+                ))
             elif score is None:
-                explicit_status = (session_statuses or {}).get(str(session_number), "")
                 if explicit_status == "INCOMPLETE":
                     observations.extend(self._observations(participant_id, session_id, None,
                                                            ObservationStatus.INCOMPLETE, provenance))

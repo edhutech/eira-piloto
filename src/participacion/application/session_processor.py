@@ -80,6 +80,13 @@ class SessionProcessor:
 
     def process(self, inspection: SessionInspection) -> SessionProcessResult:
         number = inspection.session.session_number
+        if inspection.discovery_status == "NEEDS_REVIEW":
+            return SessionProcessResult(
+                session_number=number,
+                status=SessionProcessStatus.NEEDS_REVIEW,
+                needs_review=1,
+                errors=("La reconciliación determinista de evidencia requiere revisión humana",),
+            )
         warnings: list[str] = []
         errors: list[str] = []
         participants_created = 0
@@ -91,6 +98,13 @@ class SessionProcessor:
                         chat_files=chat_files, warnings=tuple(warnings))
             if not transcript_files or not chat_files:
                 return SessionProcessResult(status=SessionProcessStatus.INCOMPLETE, **base)
+            if inspection.auto_discovery and (len(transcript_files) > 1 or len(chat_files) > 1):
+                return SessionProcessResult(
+                    status=SessionProcessStatus.NEEDS_REVIEW,
+                    needs_review=1,
+                    errors=("Hay múltiples artefactos válidos del mismo tipo de evidencia",),
+                    **base,
+                )
 
             events = [event for _, result in parsed for event in result.events]
             system_events = sum(getattr(event, "identity_type", "HUMAN") == "SYSTEM" for event in events)

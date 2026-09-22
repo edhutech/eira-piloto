@@ -68,6 +68,7 @@ class SessionRecord:
     source_ref: str = ""
     session_id: str = ""
     evidence_sources: tuple[EvidenceSourceRef, ...] = ()
+    planned: bool = False
 
     @property
     def folder_id(self) -> str:
@@ -151,10 +152,14 @@ class SessionInspection:
     files: list[SourceArtifact] = field(default_factory=list)
     changes: list[FileChange] = field(default_factory=list)
     evidence_contexts: dict[str, EvidenceContext] = field(default_factory=dict)
+    discovery_status: str | None = None
+    auto_discovery: bool = False
 
     @property
     def requires_processing(self) -> bool:
-        return any(change.status != FileStatus.UNCHANGED for change in self.changes)
+        return bool(not self.files and (self.session.evidence_sources or self.session.source_ref)) or any(
+            change.status != FileStatus.UNCHANGED for change in self.changes
+        )
 
 
 @dataclass

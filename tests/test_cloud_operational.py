@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from participacion.adapters.google.sheets.control import GoogleSheetsControlRepository
@@ -11,10 +12,13 @@ from participacion.cli.cloud import (
     CLOUD_BUNDLE_KEY,
     CLOUD_BUNDLE_VERSION,
     _find_sheet_in_folder,
+    _validate_auto_attendance_resolution,
     run_main,
     setup_main,
 )
 from participacion.core.models import SessionRecord
+from participacion.application.external_data.models import AvailabilityStatus, CanonicalFact, SourceProvenance
+from participacion.core.participants import Participant
 
 
 class Request:
@@ -193,6 +197,50 @@ class ControlStructuralReconciliationTests(unittest.TestCase):
 
 
 class CloudNoRosterFlowTests(unittest.TestCase):
+    def test_auto_attendance_mapping_must_resolve_to_existing_participant(self):
+        mapping_result = SimpleNamespace(facts=(CanonicalFact(
+            "a@example.test", "S01", "attendance", 1,
+            AvailabilityStatus.AVAILABLE, SourceProvenance("synthetic", "Sheet", 2, "attendance"),
+        ),))
+        rows = [{
+            "external_id": "a@example.test", "status": "RESOLVED",
+            "canonical_external_id": "nobody@example.test", "reason": "test", "provenance": "test",
+        }]
+        with self.assertRaisesRegex(ValueError, "no resoluble"):
+            _validate_auto_attendance_resolution(
+                rows, mapping_result, [Participant("p1", "Synthetic", "a@example.test")]
+            )
+
+    def test_auto_attendance_mapping_resolves_existing_participant(self):
+        mapping_result = SimpleNamespace(facts=(CanonicalFact(
+            "alias@example.test", "S01", "attendance", 1,
+            AvailabilityStatus.AVAILABLE, SourceProvenance("synthetic", "Sheet", 2, "attendance"),
+        ),))
+        rows = [{
+            "external_id": "alias@example.test", "status": "RESOLVED",
+            "canonical_external_id": "person@example.test", "reason": "test", "provenance": "test",
+        }]
+        _validate_auto_attendance_resolution(
+            rows, mapping_result, [Participant("p1", "Synthetic", "person@example.test")]
+        )
+
+    def test_auto_attendance_ambiguous_identity_fails_closed(self):
+        mapping_result = SimpleNamespace(facts=(CanonicalFact(
+            "alias@example.test", "S01", "attendance", 1,
+            AvailabilityStatus.AVAILABLE, SourceProvenance("synthetic", "Sheet", 2, "attendance"),
+        ),))
+        rows = [{
+            "external_id": "alias@example.test", "status": "RESOLVED",
+            "canonical_external_id": "person@example.test", "reason": "test", "provenance": "test",
+        }]
+        with self.assertRaisesRegex(ValueError, "no resoluble"):
+            _validate_auto_attendance_resolution(
+                rows, mapping_result, [
+                    Participant("p1", "One", "person@example.test"),
+                    Participant("p2", "Two", "person@example.test"),
+                ]
+            )
+
     def test_setup_accepts_auto_mode_without_external_roster(self):
         spec = {
             "program": {

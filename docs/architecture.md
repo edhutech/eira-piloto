@@ -50,6 +50,17 @@ semantic modules. The read-only `eira-pilot` composition consumes persisted
 Participation results and mapped structured facts without changing
 `participacion-sync`.
 
+The real cloud-first composition is:
+
+    Evidence -> Participation sync -> Observations -> Longitudinal
+              -> SignalEngine -> AlertEngine -> OperationalView
+              -> Google Sheets derived views
+
+`Configuración` and `Estado` in the Eira workbook are authoritative. `Seguimiento`
+and `Seguimiento individual` are derived operational views. The legacy FollowUp
+add-on remains a separate `participacion-sync` concern and is not run by
+`eira-run`.
+
 The pilot generates one historical snapshot per ordered session. Each snapshot
 uses only observations available through its `as_of_session`; future sessions
 cannot affect its baseline, recent window, trend, streak, Signal, or Alert.
