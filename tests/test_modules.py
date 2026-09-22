@@ -113,6 +113,26 @@ class ParticipationModuleTests(unittest.TestCase):
         self.assertEqual(result.observations[0].status, ObservationStatus.NO_DATA)
         self.assertIsNone(result.observations[0].value)
 
+    def test_incomplete_status_wins_over_stale_score(self):
+        result = self.module.build_observations(
+            [score(value=Decimal("1"))], session_statuses={"1": "INCOMPLETE"}
+        )
+        self.assertNotEqual(result.observations[0].status, ObservationStatus.OBSERVED)
+        self.assertIsNone(result.observations[0].value)
+
+    def test_needs_review_status_wins_over_stale_score(self):
+        result = self.module.build_observations(
+            [score(value=Decimal("1"))], session_statuses={"1": "NEEDS_REVIEW"}
+        )
+        self.assertNotEqual(result.observations[0].status, ObservationStatus.OBSERVED)
+        self.assertIsNone(result.observations[0].value)
+
+    def test_processed_status_can_consume_score(self):
+        result = self.module.build_observations(
+            [score(value=Decimal("1"))], session_statuses={"1": "PROCESSED"}
+        )
+        self.assertEqual(result.observations[0].status, ObservationStatus.OBSERVED)
+
 
 class AttendanceModuleTests(unittest.TestCase):
     def setUp(self):

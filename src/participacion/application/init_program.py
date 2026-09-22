@@ -103,11 +103,19 @@ def _validate_evidence_session(value: Any) -> dict[str, Any]:
     normalized: list[dict[str, str]] = []
     for source in sources:
         if not isinstance(source, dict) or any(not str(source.get(key, "")).strip()
-                                               for key in ("provider", "kind", "ref", "evidence_type")):
-            raise ValueError("Cada evidence_source requiere provider, kind, ref y evidence_type")
-        if source["kind"] not in {"container", "artifact"} or source["evidence_type"] not in {"transcript", "chat"}:
-            raise ValueError("evidence_source contiene kind o evidence_type inválido")
-        normalized.append({key: str(source[key]).strip() for key in ("provider", "kind", "ref", "evidence_type")})
+                                               for key in ("provider", "kind", "ref")):
+            raise ValueError("Cada evidence_source requiere provider, kind y ref")
+        if source["kind"] not in {"container", "artifact"}:
+            raise ValueError("evidence_source contiene kind inválido")
+        evidence_type = str(source.get("evidence_type", "")).strip()
+        if source["kind"] == "artifact" and evidence_type not in {"transcript", "chat"}:
+            raise ValueError("un artifact requiere evidence_type transcript o chat")
+        if evidence_type and evidence_type not in {"transcript", "chat"}:
+            raise ValueError("evidence_source contiene evidence_type inválido")
+        normalized_source = {key: str(source[key]).strip() for key in ("provider", "kind", "ref")}
+        if evidence_type:
+            normalized_source["evidence_type"] = evidence_type
+        normalized.append(normalized_source)
     try:
         session_number = int(value["session_number"])
     except (KeyError, TypeError, ValueError) as exc:

@@ -21,7 +21,7 @@ class GoogleSheetsOperationalRepository:
     participant_repository: Any
     max_attempts: int = 3
 
-    def persist(self, view: OperationalView) -> None:
+    def persist(self, view: OperationalView) -> str:
         participants = {
             item.participant_id: item for item in self.participant_repository.load()
         }
@@ -48,18 +48,34 @@ class GoogleSheetsOperationalRepository:
                    ["attendance_observed_count", view.attendance_observed_count, view.as_of_session_id, view.generated_at],
                    *[[f"signal:{key}", value, view.as_of_session_id, view.generated_at]
                      for key, value in sorted(view.signal_counts.items())]]
-        self._replace("Seguimiento", summary)
-        self._replace("Seguimiento individual", individual)
+        statuses = (
+            self._replace("Seguimiento", summary, volatile_column=3),
+            self._replace("Seguimiento individual", individual),
+        )
+        return "NOOP" if statuses == ("NOOP", "NOOP") else "REPLACE"
 
-    def _replace(self, sheet_name: str, values: list[list[Any]]) -> None:
+    def _replace(self, sheet_name: str, values: list[list[Any]], volatile_column: int | None = None) -> str:
         existing = self._read(sheet_name)
-        self._execute(lambda: self.service.spreadsheets().values().clear(
-            spreadsheetId=self.spreadsheet_id, range=f"'{sheet_name}'!A:ZZ", body={}
-        ).execute())
+        comparable_existing = existing
+        comparable_values = values
+        if volatile_column is not None:
+            comparable_existing = [row[:volatile_column - 1] + row[volatile_column:]
+                                   for row in existing]
+            comparable_values = [row[:volatile_column - 1] + row[volatile_column:]
+                                 for row in values]
+        if comparable_existing == comparable_values:
+            return "NOOP"
         self._execute(lambda: self.service.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id, range=f"'{sheet_name}'!A1",
             valueInputOption="RAW", body={"values": values}
         ).execute())
+        if len(existing) > len(values):
+            self._execute(lambda: self.service.spreadsheets().values().clear(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"'{sheet_name}'!A{len(values) + 1}:ZZ",
+                body={},
+            ).execute())
+        return "REPLACE"
 
     def _read(self, sheet_name: str) -> list[list[Any]]:
         response = self._execute(lambda: self.service.spreadsheets().values().get(

@@ -71,10 +71,12 @@ def _session(value: Mapping[str, Any]) -> SessionRecord:
         kind = _required_text(raw.get("kind"), "evidence_sources.kind")
         ref = _required_text(raw.get("ref"), "evidence_sources.ref")
         evidence_type = raw.get("evidence_type")
-        if evidence_type not in {"transcript", "chat"}:
-            raise ValueError("INVALID: evidence_sources.evidence_type es obligatorio y debe ser transcript o chat")
+        if evidence_type is not None and evidence_type not in {"transcript", "chat"}:
+            raise ValueError("INVALID: evidence_sources.evidence_type debe ser transcript o chat")
         if kind not in {"container", "artifact"}:
             raise ValueError(f"INVALID: kind no soportado: {kind}")
+        if kind == "artifact" and evidence_type is None:
+            raise ValueError("INVALID: un artifact requiere evidence_type explícito")
         sources.append(EvidenceSourceRef(provider, cast(Literal["container", "artifact"], kind), ref, evidence_type))
     session_id = str(value.get("session_id", "") or "").strip()
     if raw_sources and not session_id:

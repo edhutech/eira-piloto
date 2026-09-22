@@ -77,14 +77,15 @@ fuentes live autoritativas. El runtime local solo es efímero.
 La composición canónica es:
 
 ```text
-Evidence → Participation → Observations → Longitudinal Core
-          → Signals → Alerts → OperationalCases → revisión humana
+Evidence → Participation sync → Observations → Longitudinal
+          → SignalEngine → AlertEngine → OperationalView
+          → Google Sheets derived views → revisión humana
 ```
 
 `eira-run` no ejecuta `IndividualFollowUpAddon` ni `TrackingRepository` legacy.
 Ese add-on pertenece únicamente a `participacion-sync`. Las vistas Eira
-`Seguimiento` y `Seguimiento individual` se regeneran desde el último
-`HistoricalSnapshot` y no son fuente de verdad.
+`Seguimiento` y `Seguimiento individual` se regeneran desde el último snapshot
+operacional alcanzado y no son fuente de verdad.
 
 El flujo legacy sigue disponible:
 
@@ -120,8 +121,9 @@ configs/pilot.example.json
 configs/session_mapping.example.json
 ```
 
-Los archivos reales deben estar bajo `configs/local/`, que está ignorado por
-Git. Attendance siempre sigue:
+En compatibilidad legacy y dry-run local, los archivos reales pueden estar bajo
+`configs/local/`, que está ignorado por Git. Eso no forma parte del flujo
+canónico cloud-first. Attendance siempre sigue:
 
 ```text
 reader genérico → mapping → CanonicalFact → AttendanceModule

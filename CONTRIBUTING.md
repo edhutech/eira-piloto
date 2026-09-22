@@ -23,5 +23,6 @@ Use synthetic identities and reserved example domains in fixtures. Never add
 real credentials, OAuth tokens, transcripts, chats, or participant data.
 Architecture tests should be updated when a boundary changes.
 
-Mypy currently checks Core plus the stable registry and shared-port contracts;
-the remaining application orchestration uses dynamic Google-facing adapters.
+Mypy checks Core, the stable registry and shared-port contracts, plus the cloud
+orchestration modules `src/participacion/cli/cloud.py`, `cloud_store.py`, and
+`control.py` included by the project configuration.

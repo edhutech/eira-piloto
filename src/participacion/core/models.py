@@ -153,6 +153,7 @@ class SessionInspection:
     changes: list[FileChange] = field(default_factory=list)
     evidence_contexts: dict[str, EvidenceContext] = field(default_factory=dict)
     discovery_status: str | None = None
+    auto_discovery: bool = False
 
     @property
     def requires_processing(self) -> bool:

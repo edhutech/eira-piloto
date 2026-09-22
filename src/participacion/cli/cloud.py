@@ -326,18 +326,22 @@ def _cloud_bundle_for_sheet(
     if headers != CLOUD_JSON_HEADERS:
         return None
     bundle: Any = None
+    found_bundle = False
     for row in values[1:]:
         key = str(row[0] if row else "").strip()
         if key != CLOUD_BUNDLE_KEY:
             continue
+        found_bundle = True
         raw = str(row[1] if len(row) > 1 else "").strip()
         if not raw:
-            return None
+            raise ValueError("Workbook contiene configuración Eira inválida/corrupta; requiere revisión")
         try:
             bundle = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
+        except json.JSONDecodeError as exc:
+            raise ValueError("Workbook contiene configuración Eira inválida/corrupta; requiere revisión") from exc
         break
+    if found_bundle and (not isinstance(bundle, Mapping) or bundle.get("version") != CLOUD_BUNDLE_VERSION):
+        raise ValueError("Workbook contiene configuración Eira inválida/corrupta; requiere revisión")
     if not isinstance(bundle, Mapping) or bundle.get("version") != CLOUD_BUNDLE_VERSION:
         return None
     program_raw = bundle.get("program")
@@ -383,6 +387,19 @@ def _validate_program_view_schema(sheets: Any, spreadsheet_id: str) -> None:
         raise ValueError("Programa requiere el schema canónico antes de aplicar setup")
 
 
+def _validate_workbook_capabilities(drive: Any, spreadsheet_id: str) -> None:
+    if not hasattr(drive, "files"):
+        return
+    response = drive.files().get(
+        fileId=spreadsheet_id,
+        fields="capabilities(canEdit,canAddChildren)",
+        supportsAllDrives=True,
+    ).execute()
+    capabilities = response.get("capabilities", {})
+    if not isinstance(capabilities, Mapping) or not capabilities.get("canEdit", False):
+        raise ValueError("El workbook existente es de solo lectura; setup requiere permisos de edición")
+
+
 def _validate_legacy_processed_sessions(sheets: Any, spreadsheet_id: str,
                                         new_sessions: list[Mapping[str, Any]]) -> None:
     response = sheets.spreadsheets().values().get(
@@ -406,11 +423,8 @@ def _validate_legacy_processed_sessions(sheets: Any, spreadsheet_id: str,
         if current is None or str(current.get("session_name", "")) != str(padded[positions["session_name"]]):
             raise ValueError(f"No se puede modificar la sesión procesada {number}; requiere migración explícita")
         source = str(padded[positions["folder_id"]]).strip()
-        evidence_sources = current.get("evidence_sources", [])
-        first_evidence_ref = (evidence_sources[0].get("ref", "")
-                              if isinstance(evidence_sources, list) and evidence_sources
-                              and isinstance(evidence_sources[0], Mapping) else "")
-        new_source = str(current.get("source_ref", "") or first_evidence_ref).strip()
+        canonical_session_id = str(current.get("session_id", "") or "").strip()
+        new_source = canonical_session_id or str(current.get("source_ref", "")).strip()
         if source and new_source and source != new_source:
             raise ValueError(f"No se puede modificar la fuente de la sesión procesada {number}")
 
@@ -572,6 +586,7 @@ def setup_main(argv: list[str] | None = None) -> int:
         if existing_sheet_id and hasattr(sheets, "spreadsheets"):
             _validate_program_view_schema(sheets, existing_sheet_id)
             _validate_legacy_processed_sessions(sheets, existing_sheet_id, sessions)
+            _validate_workbook_capabilities(drive, existing_sheet_id)
         _validate_rule_lists({
             "known_external": list(spec.get("known_external", [])),
             "attendance_identity": list(spec.get("attendance_identity", [])),
@@ -581,8 +596,9 @@ def setup_main(argv: list[str] | None = None) -> int:
         if not isinstance(known_external, list) or not isinstance(attendance_identity, list):
             raise ValueError("known_external y attendance_identity deben ser listas")
         attendance_raw = pilot.get("attendance")
+        attendance_identity_rows = list(spec.get("attendance_identity", []))
         if isinstance(attendance_raw, Mapping):
-            if participant_mode == "auto" and not spec.get("attendance_identity"):
+            if participant_mode == "auto" and not attendance_identity_rows:
                 alias_source = attendance_raw.get("email_alias_source")
                 if not isinstance(alias_source, Mapping):
                     raise ValueError(
@@ -601,6 +617,12 @@ def setup_main(argv: list[str] | None = None) -> int:
                 raise ValueError("Attendance mapping inválido: " + "; ".join(str(issue) for issue in mapping_result.issues))
             if isinstance(attendance_raw.get("email_alias_source"), Mapping):
                 _validate_alias_source(sheets, attendance_raw)
+                attendance_identity_rows.extend(_live_alias_rows(sheets, pilot))
+            if participant_mode == "auto":
+                _validate_auto_attendance_resolution(
+                    sheets, attendance_raw, attendance_identity_rows,
+                    attendance_table, mapping_result,
+                )
         candidate_bundle: dict[str, Any] = {
             "version": CLOUD_BUNDLE_VERSION,
             "program": candidate_record,
@@ -732,6 +754,29 @@ def _validate_alias_source(sheets: Any, attendance_raw: Mapping[str, Any]) -> No
         raise ValueError("email_alias_source referencia columnas inexistentes: " + ", ".join(missing))
 
 
+def _validate_auto_attendance_resolution(
+    sheets: Any, attendance_raw: Mapping[str, Any], identity_rows: list[Mapping[str, Any]],
+    attendance_table: Any, mapping_result: Any,
+) -> None:
+    """Require every auto participant in Attendance to have an explicit route."""
+    if not identity_rows:
+        raise ValueError("Attendance en modo auto requiere una política de identidad resoluble")
+    mapped = {
+        str(row.get("external_id", "") or "").strip().casefold()
+        for row in identity_rows
+        if str(row.get("external_id", "") or "").strip()
+    }
+    observed = {
+        str(fact.participant_external_id).strip().casefold()
+        for fact in mapping_result.facts
+        if str(fact.participant_external_id).strip()
+    }
+    if observed - mapped:
+        raise ValueError(
+            "Attendance en modo auto tiene participantes sin mapping de identidad explícito"
+        )
+
+
 def _write_known_external_csv(path: Path, rows: list[Mapping[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=["observed_name", "reason", "provenance"])
@@ -811,6 +856,11 @@ def run_main(argv: list[str] | None = None) -> int:
                 cloud_first=True,
             ).run(program.program_id)
             _print_results(sync_result)
+            if any(item.sessions_failed > 0 or item.errors for item in sync_result):
+                raise RuntimeError(
+                    "Participation sync falló; se conserva la vista operacional anterior"
+                )
+            lease.verify()
 
             if args.sync_only:
                 print(json.dumps({"roster": roster_result, "pilot": "SKIPPED"}, ensure_ascii=False))

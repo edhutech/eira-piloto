@@ -116,7 +116,11 @@ def inspect_program(drive: Any, program: ProgramRecord, state: dict[str, Any], p
         inspections.append(SessionInspection(session=session, files=files,
                                              changes=classify_changes(files, previous),
                                              evidence_contexts=evidence_contexts,
-                                             discovery_status=discovery_status))
+                                             discovery_status=discovery_status,
+                                             auto_discovery=any(
+                                                 source.kind == "container" and source.evidence_type is None
+                                                 for source in sources
+                                             )))
     return ProgramInspection(program=program, sessions=inspections)
 
 

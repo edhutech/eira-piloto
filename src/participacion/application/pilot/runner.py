@@ -91,6 +91,7 @@ class PilotRunner:
         alert_engine = self._alert_engine()
         snapshots: list[HistoricalSnapshot] = []
         ordered_sessions = sorted(session_order.items(), key=lambda item: item[1])
+        statuses = self.sources.participation_statuses() if self.sources.participation_statuses else {}
         for session_id, order in ordered_sessions:
             available = tuple(item for item in observations if session_order[item.session_id] <= order)
             analyses = analyze_longitudinal(available, session_order, self._longitudinal_config)
@@ -104,6 +105,9 @@ class PilotRunner:
                 signal_set=signal_set,
                 alerts=alerts,
                 issues=issues,
+                operational=(statuses.get(str(order)) in {
+                    "PROCESSED", "INCOMPLETE", "NEEDS_REVIEW", "FAILED"
+                } if statuses else bool(available)),
             ))
         return PilotResult(self.config.program_id, tuple(snapshots), observations, issues)
 

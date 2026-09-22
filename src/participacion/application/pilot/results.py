@@ -19,6 +19,7 @@ class HistoricalSnapshot:
     signal_set: SignalSet
     alerts: tuple[Alert, ...]
     issues: tuple[object, ...] = ()
+    operational: bool = True
 
 
 @dataclass(frozen=True)

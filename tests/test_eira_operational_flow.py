@@ -69,6 +69,14 @@ class OperationalFlowTests(unittest.TestCase):
         self.assertEqual(view.cases, ())
         self.assertEqual(view.summary(), {"NORMAL": 0, "OBSERVAR": 0, "INSUFFICIENT_DATA": 0})
 
+    def test_planned_snapshot_does_not_advance_operational_as_of(self):
+        result = PilotResult("program", (
+            HistoricalSnapshot("S01", 1, (), (), SignalSet((), ()), (), operational=True),
+            HistoricalSnapshot("S02", 2, (), (), SignalSet((), ()), (), operational=False),
+            HistoricalSnapshot("S03", 3, (), (), SignalSet((), ()), (), operational=False),
+        ), (), ())
+        self.assertEqual(build_operational_view(result).as_of_session_id, "S01")
+
     def test_operational_repository_uses_observations_not_manual_tracking(self):
         observation = Observation("p1", "S01", "attendance", "attendance_ratio", Decimal("0.8"),
                                   ObservationStatus.OBSERVED)

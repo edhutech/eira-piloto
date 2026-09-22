@@ -102,7 +102,10 @@ class OperationalView:
 def build_operational_view(result: PilotResult) -> OperationalView:
     if not result.snapshots:
         return OperationalView("", 0, (), {}, 0, _now())
-    snapshot = result.snapshots[-1]
+    operational = [snapshot for snapshot in result.snapshots if snapshot.operational]
+    if not operational:
+        return OperationalView("", 0, (), {}, 0, _now())
+    snapshot = max(operational, key=lambda item: item.as_of_order)
     cases = tuple(OperationalCase.from_alert(alert, snapshot) for alert in snapshot.alerts)
     signal_counts: dict[str, int] = {}
     for case in cases:

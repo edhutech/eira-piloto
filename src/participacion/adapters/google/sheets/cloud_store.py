@@ -163,6 +163,9 @@ class CloudRunLease:
             "expires_at": time.time() + self.timeout_seconds,
         }
         self.state_store.save(state)
+        confirmed = self.state_store.load().get("lease")
+        if not isinstance(confirmed, Mapping) or confirmed.get("run_id") != self.run_id:
+            raise RuntimeError("El lease cloud fue sobrescrito durante la adquisición")
         self.acquired = True
 
     def release(self) -> None:
@@ -174,3 +177,9 @@ class CloudRunLease:
             state.pop("lease", None)
             self.state_store.save(state)
         self.acquired = False
+
+    def verify(self) -> None:
+        current = self.state_store.load().get("lease")
+        if (not isinstance(current, Mapping) or current.get("run_id") != self.run_id
+                or float(current.get("expires_at", 0)) <= time.time()):
+            raise RuntimeError("El lease cloud ya no pertenece a esta ejecución")
