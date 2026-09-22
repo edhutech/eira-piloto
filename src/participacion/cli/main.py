@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -23,19 +21,13 @@ from ..adapters.google.sheets.session_results import GoogleSheetsSessionResultsG
 from ..adapters.google.sheets.follow_up import (ControlRepository, FollowUpRepository,
                                     GoogleSheetsFollowUpGateway)
 from ..adapters.google.sheets.control import GoogleSheetsControlRepository
-from ..application.events import ApplicationEvent
-from ..application.notifications import notify_events
 from ..addons.follow_up.addon import IndividualFollowUpAddon
-from ..adapters.notifications.none import NoneNotifier
-from ..adapters.notifications.notify_send import NotifySendNotifier
-from ..adapters.notifications.stdout import StdoutNotifier
 
 from ..adapters.filesystem.state import DEFAULT_STATE_PATH
 from ..adapters.google.sheets.tracking import GoogleSheetsTrackingGateway
 from ..application.tracking import TrackingRepository
 from ..adapters.google.errors import format_google_error, is_expected_google_error
 
-logger = logging.getLogger(__name__)
 
 
 def _sheet_ids(sheets: Any, spreadsheet_id: str) -> dict[str, int]:
@@ -137,79 +129,85 @@ def build_runner(programs_path: Path = DEFAULT_PROGRAMS_PATH,
 
 def _print_results(results: list[Any]) -> None:
     for result in results:
-        print(result.program_name)
+        print(f"Program: {result.program_name}")
+        session_messages: set[str] = set()
         for session in result.session_results:
-            print(f"Sesión {session.session_number}   {session.status.value}")
+            print(f"Session {session.session_number}: {session.status.value}")
+            for warning in tuple(getattr(session, "warnings", ())):
+                message = str(warning)
+                session_messages.add(message)
+                print(f"  WARNING: {message}")
+            for error in tuple(getattr(session, "errors", ())):
+                message = str(error)
+                session_messages.add(message)
+                print(f"  ERROR: {message}")
+
         ranking_status = "UPDATED" if result.ranking_changed else "NOOP"
-        print(f"Ranking    {ranking_status}")
-        print()
-        print(f"Processed: {result.sessions_processed}")
-        print(f"Skipped: {result.sessions_skipped}")
-        print(f"Incomplete: {result.sessions_incomplete}")
-        print(f"Needs review: {result.sessions_needs_review}")
-        print(f"Failed: {result.sessions_failed}")
+        print(f"Ranking: {ranking_status}")
+        print(
+            "Summary: "
+            f"processed={result.sessions_processed}, "
+            f"skipped={result.sessions_skipped}, "
+            f"incomplete={result.sessions_incomplete}, "
+            f"needs_review={result.sessions_needs_review}, "
+            f"failed={result.sessions_failed}"
+        )
+
+        for warning in tuple(getattr(result, "warnings", ())):
+            if str(warning) not in session_messages:
+                print(f"WARNING: {warning}")
+        for error in tuple(getattr(result, "errors", ())):
+            if str(error) not in session_messages:
+                print(f"ERROR: {error}")
 
 
-def _notifier(name: str):
-    return {"none": NoneNotifier, "stdout": StdoutNotifier,
-            "notify-send": NotifySendNotifier}[name]()
+def _run_failed(results: list[Any]) -> bool:
+    return any(result.sessions_failed or tuple(getattr(result, "errors", ())) for result in results)
 
 
-def main(argv: list[str] | None = None, *, runner_factory=build_runner,
-         notifier_factory=None) -> int:
-    parser = argparse.ArgumentParser(description="Ejecuta una sincronización one-shot")
-    parser.add_argument("--program", help="ID o nombre exacto del programa")
+def _print_completion(results: list[Any]) -> None:
+    if _run_failed(results):
+        print("RESULT: ERROR — the flow completed with one or more failures.", file=sys.stderr)
+        return
+    attention = sum(
+        int(getattr(result, "sessions_incomplete", 0))
+        + int(getattr(result, "sessions_needs_review", 0))
+        for result in results
+    )
+    if attention:
+        print(f"RESULT: SUCCESS — the flow completed; {attention} session(s) require attention.")
+    else:
+        print("RESULT: SUCCESS — the flow completed successfully.")
+
+
+def main(argv: list[str] | None = None, *, runner_factory=build_runner) -> int:
+    parser = argparse.ArgumentParser(description="Run one participation synchronization flow")
+    parser.add_argument("--program", help="exact program ID or name")
     parser.add_argument("--programs-path", type=Path, default=DEFAULT_PROGRAMS_PATH)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
-    parser.add_argument("--no-notify", action="store_true", help="deshabilita notificaciones de escritorio")
-    parser.add_argument("--notifier", choices=("none", "stdout", "notify-send"),
-                        default=os.environ.get("PARTICIPACION_NOTIFIER", "none"))
     args = parser.parse_args(argv)
     try:
         results = runner_factory(args.programs_path, args.state_path).run(args.program)
         if not results:
-            print("ERROR: no hay programas registrados; ejecuta participacion-init", file=sys.stderr)
-            if not args.no_notify:
-                try:
-                    notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
-                    notify_events(notifier, (ApplicationEvent(
-                        "runtime.failed", "", "participacion-sync", {},
-                    ),))
-                except Exception as notify_exc:
-                    logger.warning("notification failed: %s", notify_exc)
+            print(
+                "RESULT: ERROR — no programs are registered; run participacion-init first.",
+                file=sys.stderr,
+            )
             return 1
         _print_results(results)
-        if not args.no_notify:
-            try:
-                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
-                for result in results:
-                    notify_events(notifier, result.events)
-            except Exception as exc:
-                logger.warning("notification failed: %s", exc)
-        return 1 if any(result.sessions_failed or result.errors for result in results) else 0
+        _print_completion(results)
+        return 1 if _run_failed(results) else 0
     except (OSError, RuntimeError, ValueError, KeyError) as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
-        if not args.no_notify:
-            try:
-                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
-                notify_events(notifier, (ApplicationEvent(
-                    "runtime.failed", "", args.program or "participacion-sync", {},
-                ),))
-            except Exception as notify_exc:
-                logger.warning("notification failed: %s", notify_exc)
+        print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
         if not is_expected_google_error(exc):
+            print(
+                f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
             raise
-        print(f"ERROR: {format_google_error(exc)}", file=sys.stderr)
-        if not args.no_notify:
-            try:
-                notifier = notifier_factory() if notifier_factory else _notifier(args.notifier)
-                notify_events(notifier, (ApplicationEvent(
-                    "runtime.failed", "", args.program or "participacion-sync", {},
-                ),))
-            except Exception as notify_exc:
-                logger.warning("notification failed: %s", notify_exc)
+        print(f"RESULT: ERROR — {format_google_error(exc)}", file=sys.stderr)
         return 1
 
 

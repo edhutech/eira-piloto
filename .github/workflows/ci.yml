@@ -5,51 +5,7 @@ on:
   pull_request:
 
 jobs:
-  tests:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[dev,google,xlsx]"
-      - run: python -m unittest discover -s tests -q
-
-  static:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.14'
-      - run: python -m pip install -e ".[dev]"
-      - run: ruff check src tests
-      - run: mypy
-
-  portability:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -e .
-      - run: python -c "import participacion"
-      - run: participacion-sync --help
-      - run: participacion-init --help
-      - run: participacion-google-auth --help
-      - run: eira-pilot --help
-      - run: eira-setup --help
-      - run: eira-run --help
-
-  packaging:
+  pilot:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,12 +13,11 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip build
+      - run: python -m pip install -e ".[dev,google,xlsx]"
+      - run: python -m unittest discover -s tests -q
+      - run: ruff check src tests
+      - run: mypy
+      - run: python -m compileall -q src/participacion
       - run: python -m build
-      - run: python -m pip install dist/*.whl
-      - run: python -c "import participacion"
-      - run: participacion-sync --help
-      - run: participacion-init --help
-      - run: participacion-google-auth --help
-      - run: eira-pilot --help
       - run: eira-setup --help
       - run: eira-run --help

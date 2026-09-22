@@ -1,205 +1,201 @@
-# Eira Piloto
+# Eira Pilot
 
-Eira Piloto es un sistema experimental, determinista y auditable de señales
-tempranas para revisión humana. Usa evidencia observable de participación y
-fuentes operativas estructuradas para construir historial longitudinal,
-Signals y Alerts sin convertir datos faltantes en riesgo ni inferir deserción.
+Eira Pilot is an experimental, deterministic, and auditable early-signal system for human review. It uses observable participation evidence and structured operational sources to build longitudinal history, Signals, and Alerts without turning missing data into risk or predicting dropout.
 
-It currently includes a Google Workspace adapter and requires no LLM at
-runtime. Supported Python versions are 3.10 through 3.14.
+No LLM is required at runtime.
 
-## What it is
+## What Eira does
 
-- A deterministic participation tracker.
-- Provider-neutral Core and Application layers.
-- Google Workspace is the currently included source/storage adapter.
-- No LLM is required at runtime.
+Eira turns program evidence into explainable operational signals:
 
-## What it is not
+```text
+Evidence
+  -> Participation
+  -> Observations
+  -> Longitudinal analysis
+  -> SignalEngine
+  -> AlertEngine
+  -> OperationalView
+  -> Google Sheets derived views
+  -> Human review
+```
 
-It does not infer attendance, grade, assess learning, or diagnose or predict
-dropout. A valid voice or chat event is evidence of participation only.
+Participation and Attendance are separate dimensions. No participation does not mean absence, and missing evidence is never converted into zero participation.
 
-## How it works
+## What Eira does not do
 
-    evidence -> parse -> normalize -> identity -> countability -> score
-             -> results -> ranking/tracking -> optional add-ons
+Eira does not:
 
-Supported evidence formats: Google Docs, DOCX, VTT, SBV, and TXT.
+- predict dropout;
+- diagnose students;
+- infer attendance from participation;
+- grade learning;
+- assign probabilities or risk scores;
+- use fuzzy or LLM-based identity matching inside the deterministic runtime.
 
-Scoring is intentionally simple: valid voice = 1, valid chat = 0.5, and a
-program score is the accumulated sum. There is no relevance or quality metric.
+## Alerts
 
-Participant modes are `auto`, `import`, and `official`. Official rosters use
-strict deterministic matching and surface ambiguity for human review.
+The alert module is active and connected to the cloud-first flow.
 
-## Follow-up add-on
+`PilotRunner` sends longitudinal analyses to `SignalEngine`, then sends the resulting Signal set to `AlertEngine`. The latest operational snapshot is converted into `OperationalCase` records and persisted to the derived Google Sheets views.
 
-The optional Individual Follow-up add-on uses an official roster, eligible
-sessions, frequency over the last four sessions, and the levels Normal,
-Observar, and Crítico. It is a human-review signal, not an assessment or
-attendance decision.
+The current `pilot.v1` policy enables only:
 
-## Installation
+```text
+participation_silence_streak
+minimum_streak = 2
+-> OBSERVAR
+```
 
-This project is not published on PyPI. From a clone:
-
-    python -m venv .venv
-    . .venv/bin/activate             # Windows: .venv\\Scripts\\activate
-    pip install -e ".[google,xlsx]"
-
-For development, install `.[dev,google,xlsx]`.
-
-## Google setup
-
-Create a Desktop OAuth client in a Google Cloud project, enable Google Drive,
-Google Sheets, and Google Docs APIs, then authorize:
-
-    participacion-google-auth --client-secret /path/to/client_secret.json
-
-The command stores an authorized-user token at
-`~/.config/participacion/google_token.json` by default. Override it with
-`--token` or `PARTICIPACION_GOOGLE_TOKEN`. The client secret can also be set
-with `PARTICIPACION_GOOGLE_CLIENT_SECRET`. Never commit either file.
+`NORMAL` means that the required evaluation had enough data and no alert rule was activated. `INSUFFICIENT_DATA` remains separate. The legacy `CRÍTICO` follow-up logic belongs to `participacion-sync` and is not part of the canonical `eira-run` alert flow.
 
 ## Cloud-first operation
 
-The intended product flow is **agent-operated and Google Workspace first**.
-A program does not require a user-managed local workspace.
+The intended operating model is agent-operated and Google Workspace first. A program does not require a persistent local client workspace.
 
-A normal onboarding starts in conversation:
+A normal onboarding flow is:
 
-1. Ask the user for the Google Drive folder where Eira should live.
-2. Ask whether there is an existing live roster/attendance source.
-3. If there is one, accept the Google Sheet link directly and inspect the
-   authorized tabs/columns. Do not ask the user to export it to CSV/XLSX.
-   A roster source is optional: programs without one use deterministic
-   `participant_mode=auto` from session evidence.
-4. Ask for the session evidence location(s) and build explicit evidence-source
-   references.
-5. Ask only for mappings or identity decisions that cannot be established
-   deterministically.
-6. Initialize/reuse the Eira Google Sheet in the destination folder.
-7. Persist program configuration and sync state in the Eira workbook itself.
-8. Run `eira-run` from the Drive folder link whenever the program must be
-   processed again.
+1. Provide the Google Drive folder where Eira should live.
+2. Provide an optional live roster and Attendance Google Sheet.
+3. Provide session evidence references or authorized Drive containers.
+4. Resolve only deterministic mappings and identity decisions.
+5. Run `eira-setup`.
+6. Run `eira-run` whenever new or changed evidence must be processed.
 
-The roster/attendance source and Meet evidence may live elsewhere in Drive.
-Eira stores references; they do not need to be copied into the destination
-folder.
+The roster, Attendance source, aliases, and evidence may live outside the Eira destination folder. Eira stores references to those sources.
 
-See [docs/cloud-first-operation.md](docs/cloud-first-operation.md).
+After setup, the authoritative program configuration and processing state live in the Eira workbook:
 
-## Cloud-first CLI
+- `Configuración` stores the versioned cloud bundle.
+- `Estado` stores deterministic processing state and fingerprints.
+- `Participantes` contains the reconciled participant view.
+- `Control` contains session processing state.
+- `Seguimiento` and `Seguimiento individual` are derived operational views, not sources of truth.
 
-The agent-facing commands do not require a persistent per-program local
-workspace.
+A new machine only needs the code, Google authorization, and the program Drive-folder link.
 
-Authorize Google once on the execution environment:
+## Installation
 
-    participacion-google-auth --client-secret /path/to/client_secret.json
+This project is not published on PyPI. Install it from a clone:
 
-For onboarding, the agent builds the setup spec in memory and pipes it to Eira:
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[google,xlsx]"
+```
 
-    cat setup.json | eira-setup \
-      --drive-folder "https://drive.google.com/drive/folders/..." \
-      --spec - --yes
+For development:
 
-`configs/cloud_setup.example.json` documents the contract. The JSON file in
-this example is only a transport format: an agent can send the same JSON over
-stdin without persisting it.
+```bash
+pip install -e ".[dev,google,xlsx]"
+```
 
-After setup, a new machine or agent only needs the code, Google authorization,
-and the Drive folder link:
+## Google authorization
 
-    eira-run --drive-folder "https://drive.google.com/drive/folders/..."
+Create a Desktop OAuth client in a Google Cloud project and enable the Google Drive, Google Sheets, and Google Docs APIs.
 
-`eira-run` identifies the workbook by its cloud Eira configuration, not just
-by filename, so unrelated/legacy `Participación - ...` Sheets can coexist in
-the same folder. `--sheet` is required only when more than one valid Eira
-workbook is present.
+Authorize once on the execution environment:
 
-It reloads the live roster when configured, Attendance, aliases, program
-configuration, evidence references, and sync state from Google Workspace. It
-then runs Participation and the Eira pilot. Repeated runs remain idempotent.
+```bash
+participacion-google-auth --client-secret /path/to/client_secret.json
+```
 
-Legacy commands remain available for backwards compatibility:
+The authorized-user token is stored at `~/.config/participacion/google_token.json` by default. Override it with `--token` or `PARTICIPACION_GOOGLE_TOKEN`. Never commit OAuth tokens or client secrets.
+
+## Canonical commands
+
+Create or update the cloud configuration:
+
+```bash
+cat setup.json | eira-setup \
+  --drive-folder "https://drive.google.com/drive/folders/..." \
+  --spec - --yes
+```
+
+`configs/cloud_setup.example.json` documents the setup contract. The JSON file is only a transport format; an agent can send the same JSON through stdin without persisting it.
+
+Run the program:
+
+```bash
+eira-run --drive-folder "https://drive.google.com/drive/folders/..."
+```
+
+If more than one valid Eira workbook exists in the same folder, use `--sheet` to select the intended workbook.
+
+## Terminal results
+
+Eira uses the terminal as its runtime feedback channel. Desktop notifications are not part of the pilot runtime.
+
+At the end of a successful run, the CLI prints an explicit `RESULT: SUCCESS` message. When a run fails, it prints `RESULT: ERROR` together with the error type and message. Session-level warnings and errors are printed with the session summary so failures remain visible in the same execution context.
+
+Unexpected programming errors are not silently swallowed; they are surfaced to the terminal for debugging.
+
+## Evidence and sessions
+
+Supported evidence formats include Google Docs, DOCX, VTT, SBV, and TXT.
+
+Scoring remains intentionally simple:
+
+- valid voice event = 1;
+- valid chat event = 0.5.
+
+A future session may be configured as `planned` without evidence. A planned session with no source does not advance the operational `as_of` session. Evidence that is present but incomplete remains `INCOMPLETE`; it is never converted to zero participation.
+
+Container discovery is deterministic. Ambiguous evidence requires human review rather than an automatic guess.
+
+## Attendance and identity
+
+Attendance is read from the live configured source on every run:
+
+```text
+Google Sheet
+  -> explicit mapping
+  -> CanonicalFact
+  -> AttendanceModule
+  -> Observation
+```
+
+Identity resolution is deterministic and fail-closed. Ambiguous or unresolved identities become review cases. Auto mode can operate without a roster for Participation, but Attendance requires a resolvable deterministic identity path.
+
+## Legacy compatibility
+
+These commands remain available for backwards compatibility:
 
 - `participacion-init`
 - `participacion-sync`
 - `eira-pilot --config ... --dry-run`
 
-They are not the preferred user-facing cloud-first flow.
+They are not the preferred cloud-first flow.
 
-## Eira Piloto
+The legacy follow-up add-on remains isolated from `eira-run`.
 
-The experimental pilot is a separate, read-only composition over persisted
-Participation results and configured structured sources:
+## Scheduling
 
-    eira-pilot --config <runtime-config> --dry-run
+Eira is a one-shot application. Scheduling is external to the application.
 
-For normal operation, Attendance should point to the **live Google Sheet** that
-the organization already updates after each session. Eira reads its current
-values on every run through the generic tabular mapping layer. XLSX remains a
-backwards-compatible import/testing source, not the preferred live workflow.
-
-The pilot builds Observations, historical as-of-session snapshots,
-deterministic Signals, and Alerts. It does not modify Google Sheets and it does
-not invoke the existing sync runner. Use `configs/pilot.example.json` and
-`configs/session_mapping.example.json` as client-neutral templates.
-
-Runtime config/cache files may exist on the execution machine, but they are
-implementation state rather than a user-facing per-program workspace. Program
-evidence and authoritative operational sources should remain in Google
-Workspace. `BAJAS` is used only by the separate retrospective evaluation and
-never generates a Signal or Alert.
-
-## Configuration and state
-
-For `eira-setup` / `eira-run`, the Eira workbook is authoritative:
-
-- `Configuración` stores the cloud program bundle;
-- `Estado` stores deterministic processing state and fingerprints;
-- `Participantes` is reconciled from the configured live roster on each run,
-  or populated deterministically from evidence in auto mode when no roster is
-  configured;
-- `Control` is structurally reconciled so newly configured sessions are
-  appended without replacing manual/operational values of existing rows;
-- Attendance and explicit email aliases are reread from their live Google
-  Sheets on each run.
-
-The local registry/state variables below apply only to the legacy CLI:
-
-- `PARTICIPACION_CONFIG_DIR` — default `~/.config/participacion`.
-- `PARTICIPACION_STATE_DIR` — default `~/.local/state/participacion`.
-- `PARTICIPACION_GOOGLE_TOKEN` — authorized-user token path.
-- `PARTICIPACION_GOOGLE_CLIENT_SECRET` — Desktop client secret path.
-- `PARTICIPACION_NOTIFIER` — `none` (default), `stdout`, or `notify-send`.
-
-The application is one-shot. External scheduling is optional; see
-[docs/scheduling.md](docs/scheduling.md).
-
-## Architecture
-
-Core contains provider-neutral models and deterministic rules. Application
-orchestrates use cases and ports. Add-ons extend capabilities through generic
-contracts. Adapters implement Google, filesystem, parser, and notification
-integration. See [docs/architecture.md](docs/architecture.md).
-
-## Notifications and privacy
-
-Notification events contain aggregate, non-PII data only. Transcripts and
-chats can contain sensitive personal information; users are responsible for
-access and retention policies. OAuth tokens are credentials and must be
-protected. No LLM processes evidence at runtime.
+See [docs/scheduling.md](docs/scheduling.md).
 
 ## Development
 
-    pip install -e ".[dev,google,xlsx]"
-    python -m unittest discover -s tests -q
+The pilot keeps a deliberately lean regression suite focused on core scoring, identity, evidence parsing, cloud orchestration, Signals/Alerts, and operational persistence.
 
-Architecture rules are tested. Do not place provider SDKs, credentials, or
-personal data in Core, Application, or fixtures.
+Run:
+
+```bash
+python -m unittest discover -s tests -q
+ruff check src tests
+mypy
+python -m compileall -q src/participacion
+python -m build
+```
+
+## Privacy and security
+
+Transcripts and chats may contain personal data. Keep program evidence and operational sources in authorized Google Workspace locations and apply appropriate access, retention, and deletion policies.
+
+The repository must not contain real participant data, OAuth tokens, client secrets, transcripts, chats, or client-specific exports.
+
+See [SECURITY.md](SECURITY.md).
 
 ## License
 
