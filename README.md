@@ -72,6 +72,8 @@ A normal onboarding starts in conversation:
 2. Ask whether there is an existing live roster/attendance source.
 3. If there is one, accept the Google Sheet link directly and inspect the
    authorized tabs/columns. Do not ask the user to export it to CSV/XLSX.
+   A roster source is optional: programs without one use deterministic
+   `participant_mode=auto` from session evidence.
 4. Ask for the session evidence location(s) and build explicit evidence-source
    references.
 5. Ask only for mappings or identity decisions that cannot be established
@@ -111,7 +113,12 @@ and the Drive folder link:
 
     eira-run --drive-folder "https://drive.google.com/drive/folders/..."
 
-`eira-run` reloads the authoritative roster, Attendance, aliases, program
+`eira-run` identifies the workbook by its cloud Eira configuration, not just
+by filename, so unrelated/legacy `Participación - ...` Sheets can coexist in
+the same folder. `--sheet` is required only when more than one valid Eira
+workbook is present.
+
+It reloads the live roster when configured, Attendance, aliases, program
 configuration, evidence references, and sync state from Google Workspace. It
 then runs Participation and the Eira pilot. Repeated runs remain idempotent.
 
@@ -152,7 +159,11 @@ For `eira-setup` / `eira-run`, the Eira workbook is authoritative:
 
 - `Configuración` stores the cloud program bundle;
 - `Estado` stores deterministic processing state and fingerprints;
-- `Participantes` is reconciled from the configured live roster on each run;
+- `Participantes` is reconciled from the configured live roster on each run,
+  or populated deterministically from evidence in auto mode when no roster is
+  configured;
+- `Control` is structurally reconciled so newly configured sessions are
+  appended without replacing manual/operational values of existing rows;
 - Attendance and explicit email aliases are reread from their live Google
   Sheets on each run.
 

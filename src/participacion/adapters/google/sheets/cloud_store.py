@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from ....application.ports.contracts import StateStore
 from ...filesystem.state import empty_state
@@ -32,7 +32,7 @@ class GoogleSheetsJsonStore:
             spreadsheetId=self.spreadsheet_id,
             range=f"'{self.sheet_name}'!A:C",
         ).execute())
-        return response.get("values", [])
+        return cast(list[list[Any]], response.get("values", []))
 
     def ensure(self) -> None:
         values = self.read_values()
@@ -89,8 +89,8 @@ class GoogleSheetsJsonStore:
                     raise ValueError(f"{self.sheet_name} contiene clave duplicada: {existing}")
                 rows[existing] = row_number
         payload = [[normalized, json.dumps(value, ensure_ascii=False, sort_keys=True), _utc_now()]]
-        row_number = rows.get(normalized)
-        if row_number is None:
+        target_row = rows.get(normalized)
+        if target_row is None:
             self._execute(lambda: self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=f"'{self.sheet_name}'!A:C",
@@ -101,7 +101,7 @@ class GoogleSheetsJsonStore:
         else:
             self._execute(lambda: self.service.spreadsheets().values().update(
                 spreadsheetId=self.spreadsheet_id,
-                range=f"'{self.sheet_name}'!A{row_number}:C{row_number}",
+                range=f"'{self.sheet_name}'!A{target_row}:C{target_row}",
                 valueInputOption="RAW",
                 body={"values": payload},
             ).execute())

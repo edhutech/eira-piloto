@@ -41,8 +41,11 @@ A normal onboarding conversation is:
 1. Ask for the destination Google Drive folder.
 2. Ask for the program name and number/order of sessions when they cannot be
    derived safely.
-3. Ask for an official roster / attendance source if one exists.
-4. Inspect that Google Sheet and identify candidate tabs and columns.
+3. Ask for an official roster / attendance source if one exists. The source
+   is optional; without an official roster Eira uses deterministic auto mode
+   over session evidence.
+4. Inspect that Google Sheet and identify candidate tabs and columns when a
+   source was provided.
 5. Ask for the session evidence location(s) or discover them under the
    authorized Drive scope.
 6. Build explicit session evidence sources.
@@ -127,10 +130,22 @@ tabs:
 temporary files internally to reuse legacy components, but they are disposable
 and never authoritative.
 
-The live roster is reconciled before Participation processing. If the source
-does not declare optional fields such as aliases or enrollment bounds, Eira
-preserves the corresponding existing participant fields rather than erasing
-them. Attendance and an optional email-alias tab are reread on every run.
+When configured, the live roster is reconciled before Participation
+processing. If the source does not declare optional fields such as aliases or
+enrollment bounds, Eira preserves the corresponding existing participant
+fields rather than erasing them. Without a roster, auto mode derives
+participants from session evidence. Attendance and an optional email-alias tab
+are reread on every run.
+
+Workbook discovery is based on the versioned Eira bundle in `Configuración`
+and its Drive-folder identity, not on an exact filename. A legacy workbook with
+a compatible `Participación - <programa>...` title can be adopted during
+setup. If more than one valid Eira workbook belongs to the same folder, the
+operator must disambiguate with `--sheet`.
+
+Setup/run also reconcile the configured session list into `Control`.
+Missing rows are appended with pending state; existing processing state,
+timestamps and `tracking_eligible` remain untouched.
 
 The recovery acceptance test is:
 
