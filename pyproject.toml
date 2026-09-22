@@ -22,7 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-urls = {Homepage = "https://github.com/edhutech/participacion-agent", Repository = "https://github.com/edhutech/participacion-agent"}
+urls = {Homepage = "https://github.com/edhutech/eira-piloto", Repository = "https://github.com/edhutech/eira-piloto"}
 dependencies = []
 
 [project.optional-dependencies]
@@ -58,7 +58,10 @@ ignore = ["E702", "E731", "F841"]
 [tool.mypy]
 python_version = "3.10"
 files = ["src/participacion/core", "src/participacion/application/registry.py",
-         "src/participacion/application/ports/contracts.py"]
+         "src/participacion/application/ports/contracts.py",
+         "src/participacion/cli/cloud.py",
+         "src/participacion/adapters/google/sheets/cloud_store.py",
+         "src/participacion/adapters/google/sheets/control.py"]
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_return_any = true
