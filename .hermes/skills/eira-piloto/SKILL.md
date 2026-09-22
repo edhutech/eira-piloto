@@ -46,6 +46,9 @@ versionados.
 - `BAJAS` nunca entra en el AlertEngine ni en los snapshots históricos.
 - No convertir estados faltantes o incompletos en cero.
 - No realizar escrituras destructivas ni persistir PII en el repositorio.
+- Que una persona desaparezca del roster live no es una baja; solo campos
+  administrativos explícitos como `enrollment_status` o `end_session` cambian
+  applicability.
 
 ## Operación legacy
 
@@ -65,17 +68,52 @@ participacion-sync
 sus reglas actuales. No convertirlo en Eira ni ejecutar el flujo nuevo dentro
 de `ProgramRunner`.
 
-## Operación del piloto
+## Operación canónica Eira Piloto
 
-El piloto consume en modo read-only los resultados persistidos de Participation
-y una fuente tabular configurada:
+El flujo cloud-first es `eira-setup` seguido de `eira-run --drive-folder <URL>`.
+Google Workspace conserva Configuración, Estado, Participantes, Control y las
+fuentes live autoritativas. El runtime local solo es efímero.
+
+La composición canónica es:
 
 ```text
-eira-pilot --config configs/local/pilot.json --dry-run
+Evidence → Participation → Observations → Longitudinal Core
+          → Signals → Alerts → OperationalCases → revisión humana
 ```
 
-La configuración local puede incluir rutas, IDs de Google, hojas, columnas y
-mappings de sesiones. Usa como base:
+`eira-run` no ejecuta `IndividualFollowUpAddon` ni `TrackingRepository` legacy.
+Ese add-on pertenece únicamente a `participacion-sync`. Las vistas Eira
+`Seguimiento` y `Seguimiento individual` se regeneran desde el último
+`HistoricalSnapshot` y no son fuente de verdad.
+
+El flujo legacy sigue disponible:
+
+```text
+participacion-init
+participacion-sync
+eira-pilot --config ... --dry-run
+```
+
+`eira-run` persiste casos individuales derivados directamente de AlertEngine,
+con participante, sesión as-of, estado, nivel, Signals, evidencia, explicación
+y versiones de regla. No agrega probabilidades ni diagnóstico.
+
+Para scheduling, el one-shot canónico es:
+
+```text
+eira-run --drive-folder <URL>
+```
+
+`participacion-sync` queda limitado a scheduling legacy.
+
+La configuración cloud incluye referencias Google, hojas, mappings y sesiones.
+Las sesiones futuras pueden ser `planned` sin inventar artifacts; la ausencia
+de evidencia produce `INCOMPLETE`/`NO_DATA`, nunca `OBSERVED(0)`. Un contenedor
+de Drive puede descubrir evidencia nueva de forma determinista; ambigüedad
+produce `NEEDS_REVIEW`.
+
+Los archivos locales de configuración solo son transporte o compatibilidad.
+Usa como base:
 
 ```text
 configs/pilot.example.json
@@ -128,9 +166,10 @@ recovery permanecen desactivados hasta que exista una decisión explícita.
 `NORMAL` solo representa una evaluación suficiente sin regla activada.
 `INSUFFICIENT_DATA` es un estado separado y usa `level = None`.
 
-## Dry-run y resultados
+## Resultados operacionales
 
-El dry-run debe informar de forma agregada:
+El dry-run puede informar de forma agregada, pero `eira-run` debe devolver además
+`summary` y `cases` derivados del último snapshot:
 
 - CanonicalFacts válidos e issues por categoría;
 - identidades resueltas, no encontradas y ambiguas;
@@ -141,6 +180,8 @@ El dry-run debe informar de forma agregada:
 - participantes con evaluación suficiente por sesión;
 - Signals por tipo;
 - Alerts por nivel y `INSUFFICIENT_DATA`.
+- casos con `participant_id`, `as_of_session_id`, `evaluation_status`,
+  `alert_level`, Signals, sesiones, explicación y `rule_version`.
 
 No imprimir nombres, emails, filas completas, tokens ni transcripciones.
 Los resultados explicables incluyen Signal, evidencia, regla, versión y

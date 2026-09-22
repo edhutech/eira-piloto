@@ -60,8 +60,9 @@ def _session(value: Mapping[str, Any]) -> SessionRecord:
         raw_sources = []
     if source_ref and has_sources:
         raise ValueError("INVALID: una sesión no puede declarar source_ref y evidence_sources")
-    if not source_ref and (not has_sources or not raw_sources):
-        raise ValueError("INVALID: una sesión requiere exactamente source_ref o evidence_sources")
+    planned = bool(value.get("planned", False))
+    if not source_ref and (not has_sources or not raw_sources) and not planned:
+        raise ValueError("INVALID: una sesión requiere fuente o planned=true")
     sources: list[EvidenceSourceRef] = []
     for raw in raw_sources:
         if not isinstance(raw, Mapping):
@@ -78,7 +79,9 @@ def _session(value: Mapping[str, Any]) -> SessionRecord:
     session_id = str(value.get("session_id", "") or "").strip()
     if raw_sources and not session_id:
         raise ValueError("INVALID: una sesión nueva requiere session_id explícito")
-    return SessionRecord(number, str(value["session_name"]), source_ref, session_id, tuple(sources))
+    if planned and not session_id:
+        raise ValueError("INVALID: una sesión planned requiere session_id explícito")
+    return SessionRecord(number, str(value["session_name"]), source_ref, session_id, tuple(sources), planned)
 
 
 def _program(value: Mapping[str, Any]) -> ProgramRecord:
@@ -90,8 +93,10 @@ def _program(value: Mapping[str, Any]) -> ProgramRecord:
     sessions = tuple(sorted((_session(item) for item in raw_sessions), key=lambda item: item.session_number))
     if len({session.session_number for session in sessions}) != len(sessions):
         raise ValueError("session_number debe ser único")
-    if any(not (session.source_ref or session.evidence_sources) for session in sessions):
-        raise ValueError("Cada sesión requiere una fuente de evidencia")
+    if {session.session_number for session in sessions} != set(range(1, len(sessions) + 1)):
+        raise ValueError("session_number debe ser consecutivo desde 1")
+    if any(not (session.source_ref or session.evidence_sources or session.planned) for session in sessions):
+        raise ValueError("Cada sesión requiere una fuente de evidencia o planned=true")
     program_id = _required_text(value.get("program_id", value.get("folder_id")), "program_id")
     participant_mode = _required_text(value.get("participant_mode"), "participant_mode")
     if participant_mode not in PARTICIPANT_MODES:
@@ -148,6 +153,8 @@ def _encode_program(program: ProgramRecord | Mapping[str, Any]) -> dict[str, Any
     encoded_sessions = []
     for session in program.sessions:
         item = {"session_number": session.session_number, "session_name": session.session_name}
+        if session.planned:
+            item["planned"] = True
         if session.source_ref:
             item["source_ref"] = session.source_ref
         if session.session_id:

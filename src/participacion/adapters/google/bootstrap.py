@@ -116,6 +116,9 @@ def validate_drive_folder(drive: Any, folder_id: str) -> dict[str, Any]:
     ).execute()
     if metadata.get("mimeType") != FOLDER_MIME:
         raise ValueError("El recurso indicado no es una carpeta de Google Drive")
+    capabilities = metadata.get("capabilities", {})
+    if capabilities and (not capabilities.get("canAddChildren") or not capabilities.get("canEdit")):
+        raise PermissionError("La carpeta no permite crear y editar el workbook Eira")
     return metadata
 
 
@@ -182,16 +185,13 @@ def _sheet_values(plan: InitPlan, session_records: list[dict[str, Any]]) -> dict
 
 def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[str, Any]],
                   session_records: list[dict[str, Any]]) -> str:
-    title = f"Participación - {plan.program_name}"
+    title = f"Participación - {plan.program_name} - Eira Piloto"
     newly_created = plan.sheet_id is None
     added_sheets: list[str] = []
     if plan.sheet_id:
         sheet_id = plan.sheet_id
         existing = sheets.spreadsheets().get(spreadsheetId=sheet_id, includeGridData=False).execute()
         names = [item["properties"]["title"] for item in existing.get("sheets", [])]
-        extras = [name for name in names if name not in REQUIRED_SHEETS]
-        if extras:
-            raise RuntimeError("El Sheet existente contiene hojas adicionales: " + ", ".join(extras))
         added_sheets = [name for name in REQUIRED_SHEETS if name not in names]
         requests = [{"addSheet": {"properties": {"title": name}}}
                     for name in added_sheets]

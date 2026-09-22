@@ -63,6 +63,13 @@ class GoogleSheetStyler:
         return StylingResult(len(requests), tuple(names))
 
     def _sheet_requests(self, name: str, sheet_id: int, props: Mapping[str, Any], metadata: Mapping[str, Any]) -> list[dict[str, Any]]:
+        if name in {"Configuración", "Estado"}:
+            return [{"updateSheetProperties": {
+                "properties": {"sheetId": sheet_id, "hidden": True},
+                "fields": "hidden",
+            }}]
+        if name not in HEADERS and name not in {"Seguimiento", "Seguimiento individual"}:
+            return []
         if name == "Seguimiento":
             return self._tracking_requests(sheet_id, props)
         if name == "Seguimiento individual":

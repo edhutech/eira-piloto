@@ -80,6 +80,13 @@ class SessionProcessor:
 
     def process(self, inspection: SessionInspection) -> SessionProcessResult:
         number = inspection.session.session_number
+        if inspection.discovery_status == "NEEDS_REVIEW":
+            return SessionProcessResult(
+                session_number=number,
+                status=SessionProcessStatus.NEEDS_REVIEW,
+                needs_review=1,
+                errors=("La reconciliación determinista de evidencia requiere revisión humana",),
+            )
         warnings: list[str] = []
         errors: list[str] = []
         participants_created = 0

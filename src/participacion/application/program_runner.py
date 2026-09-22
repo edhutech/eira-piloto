@@ -22,6 +22,8 @@ class ProgramDependencies:
     tracking_repository: Any | None = None
     addons: Sequence[ProgramAddon] = ()
     control_repository: Any | None = None
+    enable_legacy_tracking: bool = True
+    enable_legacy_addons: bool = True
 
 
 @dataclass(frozen=True)
@@ -149,7 +151,7 @@ class ProgramRunner:
             errors.append(f"{type(exc).__name__}: {exc}")
 
         tracking_changed = False
-        if (dependencies.tracking_repository is not None and
+        if (dependencies.enable_legacy_tracking and dependencies.tracking_repository is not None and
                 any(item.status is not SessionProcessStatus.SKIPPED for item in session_results)):
             try:
                 tracking_result = dependencies.tracking_repository.refresh(
@@ -163,7 +165,8 @@ class ProgramRunner:
 
         addon_results: list[AddonResult] = []
         events: list[ApplicationEvent] = []
-        for addon in dependencies.addons:
+        addons = dependencies.addons if dependencies.enable_legacy_addons else ()
+        for addon in addons:
             try:
                 addon_result = addon.run(ProgramAddonContext(program, session_statuses))
             except (OSError, RuntimeError, ValueError) as exc:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import uuid
+import time
 from datetime import datetime, timezone
 from typing import Any, Mapping, cast
 
@@ -18,11 +20,12 @@ class GoogleSheetsJsonStore:
     """Small key/value JSON store backed by a dedicated Google Sheet tab."""
 
     def __init__(self, service: Any, spreadsheet_id: str, sheet_name: str,
-                 max_attempts: int = 3):
+                 max_attempts: int = 3, max_value_bytes: int = 900_000):
         self.service = service
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
         self.max_attempts = max_attempts
+        self.max_value_bytes = max_value_bytes
 
     def _execute(self, operation: Any) -> Any:
         return execute_with_transient_retry(operation, self.max_attempts)
@@ -79,6 +82,11 @@ class GoogleSheetsJsonStore:
         normalized = str(key).strip()
         if not normalized:
             raise ValueError("La clave cloud no puede estar vacía")
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        if len(encoded.encode("utf-8")) > self.max_value_bytes:
+            raise ValueError(
+                f"{self.sheet_name} {normalized} supera el límite de {self.max_value_bytes} bytes"
+            )
         self.ensure()
         values = self.read_values()
         rows: dict[str, int] = {}
@@ -88,7 +96,7 @@ class GoogleSheetsJsonStore:
                 if existing in rows:
                     raise ValueError(f"{self.sheet_name} contiene clave duplicada: {existing}")
                 rows[existing] = row_number
-        payload = [[normalized, json.dumps(value, ensure_ascii=False, sort_keys=True), _utc_now()]]
+        payload = [[normalized, encoded, _utc_now()]]
         target_row = rows.get(normalized)
         if target_row is None:
             self._execute(lambda: self.service.spreadsheets().values().append(
@@ -130,3 +138,39 @@ class GoogleSheetsStateStore(StateStore):
         if not isinstance(state, dict) or state.get("version") != 1:
             raise ValueError("Estado cloud tiene un formato o versión inválidos")
         self.store.put(self.key, state)
+
+    def acquire_lease(self, timeout_seconds: int = 900) -> "CloudRunLease":
+        lease = CloudRunLease(self, timeout_seconds)
+        lease.acquire()
+        return lease
+
+
+class CloudRunLease:
+    def __init__(self, state_store: GoogleSheetsStateStore, timeout_seconds: int):
+        self.state_store = state_store
+        self.timeout_seconds = timeout_seconds
+        self.run_id = uuid.uuid4().hex
+        self.acquired = False
+
+    def acquire(self) -> None:
+        state = self.state_store.load()
+        current = state.get("lease")
+        if isinstance(current, Mapping) and float(current.get("expires_at", 0)) > time.time():
+            raise RuntimeError("Ya existe una ejecución Eira activa para este programa")
+        state["lease"] = {
+            "run_id": self.run_id,
+            "acquired_at": time.time(),
+            "expires_at": time.time() + self.timeout_seconds,
+        }
+        self.state_store.save(state)
+        self.acquired = True
+
+    def release(self) -> None:
+        if not self.acquired:
+            return
+        state = self.state_store.load()
+        current = state.get("lease")
+        if isinstance(current, Mapping) and current.get("run_id") == self.run_id:
+            state.pop("lease", None)
+            self.state_store.save(state)
+        self.acquired = False

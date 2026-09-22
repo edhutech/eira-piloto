@@ -21,7 +21,8 @@ from ..adapters.google.bootstrap import (
 )
 from ..adapters.google.sheets.cloud_store import GoogleSheetsJsonStore, GoogleSheetsStateStore
 from ..adapters.google.sheets.control import GoogleSheetsControlRepository
-from ..adapters.google.sheets.schema import CLOUD_JSON_HEADERS
+from ..adapters.google.sheets.operational import GoogleSheetsOperationalRepository
+from ..adapters.google.sheets.schema import CLOUD_JSON_HEADERS, PROGRAM_HEADERS
 from ..adapters.google.sheets.participants import GoogleSheetsValuesGateway, ParticipantRepository
 from ..adapters.pilot.google_participation_source import (
     ReadOnlyGoogleParticipationSource,
@@ -32,12 +33,15 @@ from ..application.attendance_identity import attendance_identity_policy_from_ro
 from ..application.init_program import build_plan
 from ..application.known_external import known_external_from_rows
 from ..application.pilot.config import PilotConfig
+from ..application.pilot.config import validate_session_mapping
 from ..application.pilot.runner import PilotRunner, PilotSources, RosterApplicabilityResolver
+from ..application.external_data.mapping import MappingStatus, map_table
+from ..application.pilot.operational import build_operational_view
 from ..application.registry import program_from_dict, save_programs
 from ..application.roster import RosterImporter, RosterRecord, roster_records_from_rows, roster_records_to_participants
 from ..core.participants import Participant
 from .main import _print_results, _sheet_ids, build_runner
-from .pilot import _aggregate, _read_attendance_table
+from .pilot import _read_attendance_table
 
 
 CLOUD_BUNDLE_VERSION = 1
@@ -181,6 +185,99 @@ def _normalize_pilot(raw: Mapping[str, Any] | None, record: Mapping[str, Any]) -
     return pilot
 
 
+def _candidate_record(folder_id: str, folder_url: str, program_name: str,
+                     participant_mode: str, sessions: list[Mapping[str, Any]],
+                     sheet_id: str | None) -> dict[str, Any]:
+    return {
+        "program_id": folder_id,
+        "program_name": program_name,
+        "session_count": len(sessions),
+        "participant_mode": participant_mode,
+        "source": {"provider": "google_drive", "ref": folder_id,
+                    "metadata": {"url": folder_url}},
+        "output": {"provider": "google_sheets", "ref": sheet_id or "pending"},
+        "sessions": [dict(item) for item in sessions],
+    }
+
+
+def _validate_processed_migration(existing_bundle: Mapping[str, Any] | None,
+                                  new_program: Mapping[str, Any],
+                                  state: Mapping[str, Any] | None = None) -> None:
+    if not existing_bundle:
+        return
+    old_program = existing_bundle.get("program")
+    if not isinstance(old_program, Mapping):
+        return
+    old_sessions = {str(item.get("session_id", "")): item
+                    for item in old_program.get("sessions", []) if isinstance(item, Mapping)}
+    new_sessions = {str(item.get("session_id", "")): item
+                    for item in new_program.get("sessions", []) if isinstance(item, Mapping)}
+    old_state = (state or {}).get("programs", {})
+    old_program_state = old_state.get(str(old_program.get("program_id", "")), {})
+    session_state = old_program_state.get("sessions", {}) if isinstance(old_program_state, Mapping) else {}
+    for session_id, old_session in old_sessions.items():
+        current = session_state.get(session_id, {})
+        processed = isinstance(current, Mapping) and current.get("status") == "PROCESSED"
+        new_session = new_sessions.get(session_id)
+        changed = new_session is None or any(
+            old_session.get(field) != new_session.get(field)
+            for field in ("session_number", "session_name", "evidence_sources", "source_ref")
+        )
+        if processed and changed:
+            raise ValueError(
+                f"No se puede modificar la sesión procesada {session_id}; requiere migración explícita"
+            )
+
+
+def _reconcile_program_view(sheets: Any, spreadsheet_id: str, record: Mapping[str, Any],
+                            pilot: Mapping[str, Any]) -> None:
+    response = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range="'Programa'!A:ZZ"
+    ).execute()
+    values = response.get("values", [])
+    desired = [
+        record.get("program_id", ""), record.get("program_name", ""),
+        record.get("session_count", ""), record.get("participant_mode", ""),
+        (record.get("source") or {}).get("provider", ""),
+        (record.get("source") or {}).get("ref", ""),
+        ((record.get("source") or {}).get("metadata") or {}).get("url", ""),
+        (record.get("output") or {}).get("provider", ""),
+        (record.get("output") or {}).get("ref", ""),
+        record.get("created_at", ""),
+        str((pilot.get("signals") or {}).get("version", "")),
+    ]
+    if not values:
+        sheets.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id, range="'Programa'!A1",
+            valueInputOption="RAW", body={"values": [PROGRAM_HEADERS, desired]},
+        ).execute()
+        return
+    headers = [str(value).strip() for value in values[0]]
+    if headers != PROGRAM_HEADERS:
+        raise ValueError("Programa requiere el schema canónico antes de reconciliarse")
+    current = list(values[1]) if len(values) > 1 else []
+    current.extend([""] * (len(PROGRAM_HEADERS) - len(current)))
+    if current[9]:
+        desired[9] = current[9]
+    updates = [{
+        "range": f"'Programa'!{_column(index + 1)}2",
+        "values": [[value]],
+    } for index, value in enumerate(desired) if current[index] != value]
+    if updates:
+        sheets.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": updates},
+        ).execute()
+
+
+def _column(number: int) -> str:
+    result = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
 def _validate_rule_lists(bundle: Mapping[str, Any]) -> None:
     known = bundle.get("known_external", [])
     attendance = bundle.get("attendance_identity", [])
@@ -255,6 +352,67 @@ def _cloud_bundle_for_sheet(
     if str(output.get("ref", "")).strip() not in {"", spreadsheet_id}:
         return None
     return bundle
+
+
+def _cloud_json_value(sheets: Any, spreadsheet_id: str, sheet_name: str, key: str) -> Any:
+    response = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range=f"'{sheet_name}'!A:C"
+    ).execute()
+    values = response.get("values", [])
+    if values and [str(value).strip() for value in values[0]] != CLOUD_JSON_HEADERS:
+        raise ValueError(f"{sheet_name} requiere encabezados exactos: {', '.join(CLOUD_JSON_HEADERS)}")
+    for row in values[1:]:
+        if str(row[0] if row else "").strip() != key:
+            continue
+        raw = str(row[1] if len(row) > 1 else "").strip()
+        if not raw:
+            raise ValueError(f"{sheet_name}: value_json vacío para {key}")
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{sheet_name}: JSON inválido para {key}") from exc
+    return None
+
+
+def _validate_program_view_schema(sheets: Any, spreadsheet_id: str) -> None:
+    response = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range="'Programa'!A:ZZ"
+    ).execute()
+    values = response.get("values", [])
+    if values and [str(value).strip() for value in values[0]] != PROGRAM_HEADERS:
+        raise ValueError("Programa requiere el schema canónico antes de aplicar setup")
+
+
+def _validate_legacy_processed_sessions(sheets: Any, spreadsheet_id: str,
+                                        new_sessions: list[Mapping[str, Any]]) -> None:
+    response = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id, range="'Control'!A:ZZ"
+    ).execute()
+    values = response.get("values", [])
+    if not values:
+        return
+    headers = [str(value).strip() for value in values[0]]
+    required = {"session_number", "session_name", "folder_id", "processing_status"}
+    if not required.issubset(headers):
+        raise ValueError("Control requiere columnas canónicas para validar migraciones")
+    positions = {header: headers.index(header) for header in required}
+    by_number = {int(item.get("session_number", 0)): item for item in new_sessions}
+    for row in values[1:]:
+        padded = list(row) + [""] * (len(headers) - len(row))
+        if str(padded[positions["processing_status"]]).strip() != "PROCESSED":
+            continue
+        number = int(str(padded[positions["session_number"]]).strip())
+        current = by_number.get(number)
+        if current is None or str(current.get("session_name", "")) != str(padded[positions["session_name"]]):
+            raise ValueError(f"No se puede modificar la sesión procesada {number}; requiere migración explícita")
+        source = str(padded[positions["folder_id"]]).strip()
+        evidence_sources = current.get("evidence_sources", [])
+        first_evidence_ref = (evidence_sources[0].get("ref", "")
+                              if isinstance(evidence_sources, list) and evidence_sources
+                              and isinstance(evidence_sources[0], Mapping) else "")
+        new_source = str(current.get("source_ref", "") or first_evidence_ref).strip()
+        if source and new_source and source != new_source:
+            raise ValueError(f"No se puede modificar la fuente de la sesión procesada {number}")
 
 
 def _find_sheet_in_folder(
@@ -380,6 +538,11 @@ def setup_main(argv: list[str] | None = None) -> int:
             program_name=program_name,
             allow_legacy=True,
         )
+        existing_bundle = (_cloud_bundle_for_sheet(
+            sheets, existing_sheet_id, folder_id=folder_id
+        ) if existing_sheet_id and hasattr(sheets, "spreadsheets") else None)
+        existing_titles = (_sheet_titles(sheets, existing_sheet_id)
+                           if existing_sheet_id and hasattr(sheets, "spreadsheets") else set())
         plan = build_plan(
             program_name=program_name,
             current_folder_name=program_name,  # cloud-first: no renombrar la carpeta del usuario
@@ -392,6 +555,63 @@ def setup_main(argv: list[str] | None = None) -> int:
             existing_sheet_id=existing_sheet_id,
             evidence_sessions=sessions,
         )
+        candidate_record = _candidate_record(
+            folder_id, args.drive_folder, program_name, participant_mode, sessions,
+            existing_sheet_id,
+        )
+        pilot = _normalize_pilot(
+            spec.get("pilot") if isinstance(spec.get("pilot"), Mapping) else None,
+            candidate_record,
+        )
+        candidate_program = program_from_dict(candidate_record)
+        validate_session_mapping(pilot, candidate_program)
+        existing_state = None
+        if existing_sheet_id and "Estado" in existing_titles:
+            existing_state = _cloud_json_value(sheets, existing_sheet_id, "Estado", "sync_state")
+        _validate_processed_migration(existing_bundle, candidate_record, existing_state)
+        if existing_sheet_id and hasattr(sheets, "spreadsheets"):
+            _validate_program_view_schema(sheets, existing_sheet_id)
+            _validate_legacy_processed_sessions(sheets, existing_sheet_id, sessions)
+        _validate_rule_lists({
+            "known_external": list(spec.get("known_external", [])),
+            "attendance_identity": list(spec.get("attendance_identity", [])),
+        })
+        known_external = spec.get("known_external", [])
+        attendance_identity = spec.get("attendance_identity", [])
+        if not isinstance(known_external, list) or not isinstance(attendance_identity, list):
+            raise ValueError("known_external y attendance_identity deben ser listas")
+        attendance_raw = pilot.get("attendance")
+        if isinstance(attendance_raw, Mapping):
+            if participant_mode == "auto" and not spec.get("attendance_identity"):
+                alias_source = attendance_raw.get("email_alias_source")
+                if not isinstance(alias_source, Mapping):
+                    raise ValueError(
+                        "Attendance en modo auto requiere roster official o una política explícita de identidad"
+                    )
+            source = attendance_raw.get("source")
+            mapping = attendance_raw.get("mapping")
+            if not isinstance(source, Mapping) or not isinstance(mapping, Mapping):
+                raise ValueError("pilot.attendance requiere source y mapping")
+            attendance_table = _source_table(sheets, source)
+            pilot_config = PilotConfig.from_dict(pilot)
+            if pilot_config.attendance_mapping is None:
+                raise ValueError("Attendance mapping ausente")
+            mapping_result = map_table(attendance_table, pilot_config.attendance_mapping)
+            if mapping_result.status is not MappingStatus.VALID:
+                raise ValueError("Attendance mapping inválido: " + "; ".join(str(issue) for issue in mapping_result.issues))
+            if isinstance(attendance_raw.get("email_alias_source"), Mapping):
+                _validate_alias_source(sheets, attendance_raw)
+        candidate_bundle: dict[str, Any] = {
+            "version": CLOUD_BUNDLE_VERSION,
+            "program": candidate_record,
+            "pilot": pilot,
+            "known_external": known_external,
+            "attendance_identity": attendance_identity,
+        }
+        if isinstance(roster_raw, Mapping):
+            candidate_bundle["roster"] = dict(roster_raw)
+        if len(json.dumps(candidate_bundle, ensure_ascii=False).encode("utf-8")) > 900_000:
+            raise ValueError("La configuración cloud supera el límite de 900 KB")
         print(f"Programa: {program_name}")
         print(f"Carpeta Drive: {args.drive_folder}")
         if participant_mode == "official":
@@ -406,11 +626,9 @@ def setup_main(argv: list[str] | None = None) -> int:
                 return 0
 
         record = execute_init(plan, drive, sheets, metadata, persist_local_registry=False)
-        record.pop("created_at", None)
-        pilot = _normalize_pilot(
-            spec.get("pilot") if isinstance(spec.get("pilot"), Mapping) else None,
-            record,
-        )
+        pilot = _normalize_pilot(pilot, record)
+        if hasattr(sheets, "spreadsheets"):
+            _reconcile_program_view(sheets, record["output"]["ref"], record, pilot)
         bundle: dict[str, Any] = {
             "version": CLOUD_BUNDLE_VERSION,
             "program": record,
@@ -500,6 +718,20 @@ def _live_alias_rows(sheets: Any, pilot_raw: Mapping[str, Any]) -> list[dict[str
     return rows
 
 
+def _validate_alias_source(sheets: Any, attendance_raw: Mapping[str, Any]) -> None:
+    source = attendance_raw.get("email_alias_source")
+    if not isinstance(source, Mapping):
+        return
+    alias_column = str(source.get("alias_column", "")).strip()
+    canonical_column = str(source.get("canonical_column", "")).strip()
+    if not alias_column or not canonical_column:
+        raise ValueError("email_alias_source requiere alias_column y canonical_column")
+    table = _source_table(sheets, source)
+    missing = [column for column in (alias_column, canonical_column) if column not in table.columns]
+    if missing:
+        raise ValueError("email_alias_source referencia columnas inexistentes: " + ", ".join(missing))
+
+
 def _write_known_external_csv(path: Path, rows: list[Mapping[str, Any]]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=["observed_name", "reason", "provenance"])
@@ -520,6 +752,7 @@ def run_main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sheet", default="", help="URL/ID del Sheet Eira si la carpeta contiene más de uno")
     parser.add_argument("--sync-only", action="store_true")
     args = parser.parse_args(argv)
+    lease = None
     try:
         folder_id = extract_folder_id(args.drive_folder)
         drive, sheets, _ = get_google_services_with_docs()
@@ -550,6 +783,11 @@ def run_main(argv: list[str] | None = None) -> int:
         if program.participant_mode == "official" and not isinstance(roster_raw, Mapping):
             raise ValueError("Programa official sin roster cloud configurado")
 
+        state_store = GoogleSheetsStateStore(
+            GoogleSheetsJsonStore(sheets, sheet_id, "Estado")
+        )
+        lease = state_store.acquire_lease()
+
         if isinstance(roster_raw, Mapping):
             roster_result: Mapping[str, Any] = _refresh_live_roster(
                 sheets, sheet_id, roster_raw
@@ -557,10 +795,6 @@ def run_main(argv: list[str] | None = None) -> int:
         else:
             roster_result = {"mode": "auto", "source": "session_evidence"}
         GoogleSheetsControlRepository(sheets, sheet_id).ensure_sessions(program.sessions)
-        state_store = GoogleSheetsStateStore(
-            GoogleSheetsJsonStore(sheets, sheet_id, "Estado")
-        )
-
         known_rows = list(bundle.get("known_external", []))
         with tempfile.TemporaryDirectory(prefix="eira-cloud-") as directory:
             temp = Path(directory)
@@ -574,6 +808,7 @@ def run_main(argv: list[str] | None = None) -> int:
             sync_result = build_runner(
                 programs_path=programs_path,
                 state_store=state_store,
+                cloud_first=True,
             ).run(program.program_id)
             _print_results(sync_result)
 
@@ -582,6 +817,7 @@ def run_main(argv: list[str] | None = None) -> int:
                 return 0
 
             pilot = PilotConfig.from_dict(pilot_raw)
+            validate_session_mapping(pilot, program)
             google_source = ReadOnlyGoogleParticipationSource(sheets, sheet_id, {})
             participants = google_source.participants()
             participant_resolver: Any = build_participant_resolver(participants)
@@ -590,6 +826,11 @@ def run_main(argv: list[str] | None = None) -> int:
             if identity_rows:
                 participant_resolver = attendance_identity_policy_from_rows(
                     identity_rows, participant_resolver
+                )
+            if (program.participant_mode == "auto" and pilot.attendance_mapping is not None
+                    and not identity_rows):
+                raise ValueError(
+                    "Attendance en modo auto requiere una política de identidad explícita"
                 )
             session_orders = {
                 item.session_id: item.session_order for item in pilot.session_mapping.values()
@@ -612,14 +853,29 @@ def run_main(argv: list[str] | None = None) -> int:
                     participation_statuses=google_source.statuses,
                 ),
             ).run()
+            operational_view = build_operational_view(result)
+            operational_repository = GoogleSheetsOperationalRepository(
+                sheets, sheet_id,
+                ParticipantRepository(GoogleSheetsValuesGateway(
+                    sheets, sheet_id, "Participantes", _sheet_ids(sheets, sheet_id).get("Participantes")))
+            )
+            operational_repository.persist(operational_view)
             print(json.dumps({
                 "roster": roster_result,
-                "pilot": _aggregate(result),
+                "pilot": {
+                    "summary": operational_view.summary(),
+                    "cases": [case.to_dict() for case in operational_view.cases],
+                    "signal_counts": dict(operational_view.signal_counts),
+                    "as_of_session_id": operational_view.as_of_session_id,
+                },
             }, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if lease is not None:
+            lease.release()
 
 
 if __name__ == "__main__":
