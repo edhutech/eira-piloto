@@ -4,7 +4,6 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from participacion.adapters.google.sheets.control import GoogleSheetsControlRepository
