@@ -889,6 +889,7 @@ def run_main(argv: list[str] | None = None) -> int:
 
             if args.sync_only:
                 print(json.dumps({"roster": roster_result, "pilot": "SKIPPED"}, ensure_ascii=False))
+                print("RESULT: SUCCESS — Participation sync completed successfully.")
                 return 0
 
             pilot = PilotConfig.from_dict(pilot_raw)
@@ -944,10 +945,17 @@ def run_main(argv: list[str] | None = None) -> int:
                     "as_of_session_id": operational_view.as_of_session_id,
                 },
             }, ensure_ascii=False, indent=2, sort_keys=True))
+            print("RESULT: SUCCESS — Eira flow completed successfully.")
         return 0
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
-        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        print(
+            f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        raise
     finally:
         if lease is not None:
             lease.release()

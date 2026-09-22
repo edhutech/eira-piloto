@@ -1,1 +1,0 @@
-"""Optional notification delivery adapters."""
