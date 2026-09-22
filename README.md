@@ -1,8 +1,9 @@
-# participacion-agent
+# Eira Piloto
 
-An open-source deterministic CLI application for one-shot participation tracking from session evidence
-(voice and chat) into auditable results, cumulative follow-up, and optional
-longitudinal signals.
+Eira Piloto es un sistema experimental, determinista y auditable de señales
+tempranas para revisión humana. Usa evidencia observable de participación y
+fuentes operativas estructuradas para construir historial longitudinal,
+Signals y Alerts sin convertir datos faltantes en riesgo ni inferir deserción.
 
 It currently includes a Google Workspace adapter and requires no LLM at
 runtime. Supported Python versions are 3.10 through 3.14.
@@ -130,7 +131,7 @@ Legacy commands remain available for backwards compatibility:
 
 They are not the preferred user-facing cloud-first flow.
 
-## Eira pilot
+## Eira Piloto
 
 The experimental pilot is a separate, read-only composition over persisted
 Participation results and configured structured sources:
