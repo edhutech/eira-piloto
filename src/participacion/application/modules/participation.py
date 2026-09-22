@@ -116,12 +116,9 @@ class ParticipationModule:
                     participant_id, session_id,
                 ))
             elif score is None:
-                if explicit_status == "INCOMPLETE":
+                if explicit_status == "PROCESSED":
                     observations.extend(self._observations(participant_id, session_id, None,
-                                                           ObservationStatus.INCOMPLETE, provenance))
-                    issues.append(ModuleIssue(ModuleIssueStatus.NEEDS_REVIEW, "SESSION_INCOMPLETE",
-                                              "La sesión tiene estado explícito INCOMPLETE",
-                                              participant_id, session_id))
+                                                           ObservationStatus.OBSERVED, provenance))
                 elif self.config.coverage is SourceCoverage.EXHAUSTIVE:
                     observations.extend(self._observations(participant_id, session_id, None,
                                                            ObservationStatus.NO_DATA, provenance))
@@ -143,10 +140,10 @@ class ParticipationModule:
     def _observations(self, participant_id: str, session_id: str, score: ParticipantSessionScore | None,
                       status: ObservationStatus, provenance: tuple[ObservationProvenance, ...]) -> list[Observation]:
         values: Mapping[str, object | None] = {
-            "participation_score": score.score if score else None,
-            "voice_valid": score.voice_valid if score else None,
-            "chat_valid": score.chat_valid if score else None,
-            "ambiguous_total": score.ambiguous_total if score else None,
+            "participation_score": score.score if score else 0,
+            "voice_valid": score.voice_valid if score else 0,
+            "chat_valid": score.chat_valid if score else 0,
+            "ambiguous_total": score.ambiguous_total if score else 0,
         }
         return [Observation(participant_id, session_id, "participation", metric,
                             values[metric] if status is ObservationStatus.OBSERVED else None,

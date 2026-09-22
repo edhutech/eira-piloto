@@ -82,6 +82,54 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(result.snapshots[1].signal_set.signals[0].signal_type, "participation_silence_streak")
         self.assertEqual(result.snapshots[1].alerts[0].level, AlertLevel.OBSERVAR)
 
+    def test_missing_scores_in_processed_sessions_generate_silence_alert(self) -> None:
+        raw = self._config().to_dict()
+        raw.pop("attendance")
+        config = PilotConfig.from_dict(raw)
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "person@example.test",
+        }]), match_email=True)
+        result = PilotRunner(
+            config,
+            PilotSources(
+                participant_scores=lambda: (),
+                attendance_table=None,
+                participant_resolver=resolver,
+                participant_ids=lambda: ("participant-1",),
+                participation_statuses=lambda: {"1": "PROCESSED", "2": "PROCESSED"},
+            ),
+        ).run()
+        self.assertEqual(result.snapshots[1].signal_set.signals[0].signal_type, "participation_silence_streak")
+        self.assertEqual(result.snapshots[1].alerts[0].level, AlertLevel.OBSERVAR)
+
+    def test_incomplete_current_session_is_insufficient_not_normal(self) -> None:
+        raw = self._config().to_dict()
+        raw.pop("attendance")
+        config = PilotConfig.from_dict(raw)
+        scores = (ParticipantSessionScore(1, "participant-1", 1, 1, 0, 0, 0, Decimal("1"), True),)
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "person@example.test",
+        }]), match_email=True)
+        result = PilotRunner(
+            config,
+            PilotSources(
+                participant_scores=lambda: scores,
+                attendance_table=None,
+                participant_resolver=resolver,
+                participant_ids=lambda: ("participant-1",),
+                participation_statuses=lambda: {"1": "PROCESSED", "2": "INCOMPLETE"},
+            ),
+        ).run()
+        self.assertEqual(result.snapshots[1].signal_set.signals, ())
+        self.assertEqual(result.snapshots[1].alerts[0].evaluation_status, AlertEvaluationStatus.INSUFFICIENT_DATA)
+        self.assertIsNone(result.snapshots[1].alerts[0].level)
+
+    def test_invalid_silence_level_is_rejected(self) -> None:
+        raw = self._config().to_dict()
+        raw["alerts"]["silence_level"] = "CRITICO"
+        with self.assertRaisesRegex(ValueError, "solo puede ser OBSERVAR"):
+            PilotConfig.from_dict(raw)
+
     def test_historical_snapshot_does_not_use_future_observations(self) -> None:
         config = self._config()
         scores = (

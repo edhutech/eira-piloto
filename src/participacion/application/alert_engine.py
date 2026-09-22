@@ -67,6 +67,9 @@ class AlertEngine:
         return sorted(matches, key=lambda item: (-priority[item[0].level], item[0].rule_version))
 
     def _sufficient(self, contexts: tuple[EvaluationContext, ...]) -> bool:
-        by_key = {(item.dimension, item.metric): item.sufficient_data for item in contexts}
+        by_key = {
+            (item.dimension, item.metric): item.sufficient_data and item.current_evaluable
+            for item in contexts
+        }
         required = self.config.required_evaluations or tuple(by_key)
         return bool(required) and all(by_key.get(key, False) for key in required)

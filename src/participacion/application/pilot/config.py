@@ -60,6 +60,10 @@ class PilotConfig:
         minimum_streak = int(silence.get("minimum_streak", 2))
         if minimum_streak < 1:
             raise ValueError("minimum_streak debe ser positivo")
+        alerts = _mapping(raw.get("alerts"), "alerts")
+        silence_level = alerts.get("silence_level")
+        if silence_level is not None and str(silence_level).strip().upper() != "OBSERVAR":
+            raise ValueError("alerts.silence_level solo puede ser OBSERVAR")
         return cls(
             program_id=_text(program.get("program_id"), "program.program_id"),
             program_name=_text(program.get("program_name"), "program.program_name"),
@@ -74,7 +78,7 @@ class PilotConfig:
             signal_version=_text(signals.get("version", "pilot.v1"), "signals.version"),
             silence_enabled=bool(silence.get("enabled", False)),
             silence_minimum_streak=minimum_streak,
-            alert_version=_text(_mapping(raw.get("alerts"), "alerts").get("version", "pilot.v1"), "alerts.version"),
+            alert_version=_text(alerts.get("version", "pilot.v1"), "alerts.version"),
             participation_coverage=_coverage(_mapping(raw.get("participation"), "participation").get("coverage", "UNKNOWN")),
             attendance_coverage=_coverage(attendance.get("coverage", "UNKNOWN")) if attendance is not None else SourceCoverage.UNKNOWN,
             attendance_identity_path=(str(attendance.get("identity_path", "")).strip()

@@ -20,6 +20,7 @@ class EvaluationContext:
     dimension: str
     metric: str
     sufficient_data: bool
+    current_evaluable: bool = True
 
 
 @dataclass(frozen=True)

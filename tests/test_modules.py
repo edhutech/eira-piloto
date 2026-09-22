@@ -113,6 +113,22 @@ class ParticipationModuleTests(unittest.TestCase):
         self.assertEqual(result.observations[0].status, ObservationStatus.NO_DATA)
         self.assertIsNone(result.observations[0].value)
 
+    def test_processed_missing_expected_pair_is_observed_zero(self):
+        result = self.module.build_observations(
+            [], expected_pairs=[ParticipantSessionPair("p1", "1")],
+            session_statuses={"1": "PROCESSED"},
+        )
+        self.assertEqual(result.observations[0].status, ObservationStatus.OBSERVED)
+        self.assertEqual(result.observations[0].value, 0)
+
+    def test_incomplete_missing_expected_pair_is_not_observed_zero(self):
+        result = self.module.build_observations(
+            [], expected_pairs=[ParticipantSessionPair("p1", "1")],
+            session_statuses={"1": "INCOMPLETE"},
+        )
+        self.assertEqual(result.observations[0].status, ObservationStatus.INCOMPLETE)
+        self.assertIsNone(result.observations[0].value)
+
     def test_incomplete_status_wins_over_stale_score(self):
         result = self.module.build_observations(
             [score(value=Decimal("1"))], session_statuses={"1": "INCOMPLETE"}

@@ -66,6 +66,7 @@ class LongitudinalAnalysis:
     recent_session_ids: tuple[str, ...] = ()
     previous_recent_session_ids: tuple[str, ...] = ()
     previous_recent_average: float | None = None
+    current_status: ObservationStatus | None = None
 
 
 def analyze_longitudinal(
@@ -138,6 +139,7 @@ def _analyze_group(
         recent_session_ids=tuple(item.session_id for item in recent),
         previous_recent_session_ids=tuple(item.session_id for item in previous_recent),
         previous_recent_average=previous_recent_average,
+        current_status=ordered[-1].status if ordered else None,
     )
 
 

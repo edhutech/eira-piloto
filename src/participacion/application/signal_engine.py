@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from ..core.longitudinal import LongitudinalAnalysis
+from ..core.observation import ObservationStatus
 from ..core.signals import EvaluationContext, Signal, SignalSet
 
 
@@ -53,7 +54,13 @@ class SignalEngine:
     def generate(self, analyses: Iterable[LongitudinalAnalysis]) -> SignalSet:
         analysis_list = tuple(sorted(analyses, key=lambda item: (item.participant_id, item.dimension, item.metric)))
         evaluations = tuple(
-            EvaluationContext(item.participant_id, item.dimension, item.metric, item.sufficient_data)
+            EvaluationContext(
+                item.participant_id,
+                item.dimension,
+                item.metric,
+                item.sufficient_data,
+                item.current_status is ObservationStatus.OBSERVED,
+            )
             for item in analysis_list
         )
         signals: list[Signal] = []
