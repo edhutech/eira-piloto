@@ -21,6 +21,7 @@ from ..adapters.google.bootstrap import (
 )
 from ..adapters.google.sheets.cloud_store import GoogleSheetsJsonStore, GoogleSheetsStateStore
 from ..adapters.google.sheets.control import GoogleSheetsControlRepository
+from ..adapters.google.sheets.schema import CLOUD_JSON_HEADERS
 from ..adapters.google.sheets.participants import GoogleSheetsValuesGateway, ParticipantRepository
 from ..adapters.pilot.google_participation_source import (
     ReadOnlyGoogleParticipationSource,
@@ -213,12 +214,33 @@ def _cloud_bundle_for_sheet(
     *,
     folder_id: str,
 ) -> Mapping[str, Any] | None:
+    """Inspect a workbook without mutating it during discovery."""
     titles = _sheet_titles(sheets, spreadsheet_id)
     if "Configuración" not in titles:
         return None
-    bundle = GoogleSheetsJsonStore(
-        sheets, spreadsheet_id, "Configuración"
-    ).get(CLOUD_BUNDLE_KEY)
+    response = sheets.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range="'Configuración'!A:C",
+    ).execute()
+    values = response.get("values", [])
+    if not values:
+        return None
+    headers = [str(value).strip() for value in values[0]]
+    if headers != CLOUD_JSON_HEADERS:
+        return None
+    bundle: Any = None
+    for row in values[1:]:
+        key = str(row[0] if row else "").strip()
+        if key != CLOUD_BUNDLE_KEY:
+            continue
+        raw = str(row[1] if len(row) > 1 else "").strip()
+        if not raw:
+            return None
+        try:
+            bundle = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        break
     if not isinstance(bundle, Mapping) or bundle.get("version") != CLOUD_BUNDLE_VERSION:
         return None
     program_raw = bundle.get("program")
@@ -244,13 +266,15 @@ def _find_sheet_in_folder(
     program_name: str = "",
     allow_legacy: bool = False,
 ) -> str | None:
-    if sheet_value.strip():
-        return extract_spreadsheet_id(sheet_value)
-
     candidates = [
         item for item in list_children(drive, folder_id)
         if item.get("mimeType") == SHEET_MIME
     ]
+    if sheet_value.strip():
+        explicit_id = extract_spreadsheet_id(sheet_value)
+        if explicit_id not in {str(item.get("id", "")).strip() for item in candidates}:
+            raise ValueError("El workbook indicado por --sheet no pertenece a la carpeta Eira")
+        return explicit_id
     cloud_matches: list[tuple[str, Mapping[str, Any]]] = []
     for item in candidates:
         sheet_id = str(item.get("id", "")).strip()
