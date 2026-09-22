@@ -51,8 +51,8 @@ class GoogleSheetsControlRepository:
         updates: list[dict[str, Any]] = []
         inserts: list[list[Any]] = []
         for session in sorted(sessions, key=lambda item: item.session_number):
-            row_number = rows_by_session.get(session.session_number)
-            if row_number is None:
+            existing_row = rows_by_session.get(session.session_number)
+            if existing_row is None:
                 row = [""] * len(headers)
                 desired = {
                     "session_number": session.session_number,
@@ -70,7 +70,7 @@ class GoogleSheetsControlRepository:
                 inserts.append(row)
                 continue
 
-            current = values[row_number - 1]
+            current = values[existing_row - 1]
             for field, value in (
                 ("session_name", session.session_name),
                 ("folder_id", session.state_key),
@@ -79,7 +79,7 @@ class GoogleSheetsControlRepository:
                 old = str(current[column]).strip() if column < len(current) else ""
                 if old != str(value):
                     updates.append({
-                        "range": f"'{self.sheet_name}'!{_column(column + 1)}{row_number}",
+                        "range": f"'{self.sheet_name}'!{_column(column + 1)}{existing_row}",
                         "values": [[value]],
                     })
 
