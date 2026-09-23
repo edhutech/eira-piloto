@@ -59,12 +59,14 @@ class SignalEngine:
                 item.dimension,
                 item.metric,
                 item.sufficient_data,
-                item.current_status is ObservationStatus.OBSERVED,
+                item.current_evaluable or item.current_status is ObservationStatus.OBSERVED,
             )
             for item in analysis_list
         )
         signals: list[Signal] = []
         for analysis in analysis_list:
+            if not (analysis.current_evaluable or analysis.current_status is ObservationStatus.OBSERVED):
+                continue
             signals.extend(self._declines(analysis))
             signals.extend(self._streaks(analysis))
             signals.extend(self._recoveries(analysis))
@@ -92,13 +94,15 @@ class SignalEngine:
     def _streaks(self, analysis: LongitudinalAnalysis) -> list[Signal]:
         result: list[Signal] = []
         for rule in self.config.streak_rules:
-            if not self._matches(analysis, rule.dimension, rule.metric) or not analysis.sufficient_data:
+            if (not self._matches(analysis, rule.dimension, rule.metric) or not analysis.sufficient_data
+                    or not (analysis.current_evaluable or analysis.current_status is ObservationStatus.OBSERVED)):
                 continue
             streak = next((item for item in analysis.streaks if item.name == rule.streak_name), None)
             if streak is None or streak.current_length < rule.minimum_current_streak:
                 continue
             result.append(Signal(
-                analysis.participant_id, rule.signal_type, (analysis.dimension,), analysis.recent_session_ids,
+                analysis.participant_id, rule.signal_type, (analysis.dimension,),
+                streak.current_session_ids or analysis.recent_session_ids,
                 {"metric": analysis.metric, "streak_name": streak.name,
                  "current_streak": streak.current_length,
                  "minimum_current_streak": rule.minimum_current_streak}, rule.rule_version,

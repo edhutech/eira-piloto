@@ -7,7 +7,7 @@ from ...application.external_data.mapping import MappingStatus, map_table
 from ...application.external_data.models import TabularTable
 from ...application.modules.attendance import AttendanceConfig, AttendanceInput, AttendanceModule
 from ...application.modules.models import (ApplicabilityResolver, ApplicabilityResult, ApplicabilityStatus,
-                                            ParticipantSessionPair)
+                                            ExternalPair, ParticipantSessionPair, SourceCoverage)
 from ...application.modules.participation import ParticipationConfig, ParticipationModule
 from ...application.modules.resolution import ExternalParticipantResolver, MappingSessionResolver
 from ...core.alerts import AlertLevel
@@ -30,6 +30,7 @@ class PilotSources:
     applicability_resolver: ApplicabilityResolver | None = None
     participant_ids: Callable[[], Iterable[str]] | None = None
     participation_statuses: Callable[[], Mapping[str, str]] | None = None
+    attendance_expected_pairs: tuple[ExternalPair, ...] = ()
 
 
 class PilotRunner:
@@ -50,13 +51,17 @@ class PilotRunner:
             ParticipationConfig(f"google_sheets:{self.config.google_sheet_id}", coverage=self.config.participation_coverage),
         )
         participant_ids = tuple(self.sources.participant_ids() if self.sources.participant_ids else ())
+        eligible_ids = set(participant_ids)
+        source_scores = tuple(self.sources.participant_scores())
+        if self.sources.participant_ids is not None:
+            source_scores = tuple(item for item in source_scores if item.participant_id in eligible_ids)
         expected_pairs = tuple(
             ParticipantSessionPair(participant_id, str(order))
             for participant_id in participant_ids
             for _, order in session_order.items()
         )
         participation_result = participation_module.build_observations(
-            self.sources.participant_scores(),
+            source_scores,
             expected_pairs=expected_pairs,
             session_statuses=(self.sources.participation_statuses() if self.sources.participation_statuses else {}),
         )
@@ -77,9 +82,19 @@ class PilotRunner:
                 }),
             )
             attendance_result = attendance_module.build_observations(
-                AttendanceInput(mapping_result.facts, coverage=self.config.attendance_coverage)
+                AttendanceInput(
+                    mapping_result.facts,
+                    expected_pairs=self.sources.attendance_expected_pairs,
+                    coverage=(self.config.attendance_coverage
+                              if self.sources.attendance_expected_pairs or
+                              self.config.attendance_coverage is not SourceCoverage.EXHAUSTIVE
+                              else SourceCoverage.UNKNOWN),
+                )
             )
-            attendance_observations = list(attendance_result.observations)
+            attendance_observations = [
+                item for item in attendance_result.observations
+                if self.sources.participant_ids is None or item.participant_id in eligible_ids
+            ]
             attendance_issues = tuple(attendance_result.issues)
             if mapping_result.status is not MappingStatus.VALID:
                 attendance_issues += tuple(mapping_result.issues)
@@ -94,7 +109,7 @@ class PilotRunner:
         statuses = self.sources.participation_statuses() if self.sources.participation_statuses else {}
         for session_id, order in ordered_sessions:
             available = tuple(item for item in observations if session_order[item.session_id] <= order)
-            analyses = analyze_longitudinal(available, session_order, self._longitudinal_config)
+            analyses = analyze_longitudinal(available, session_order, self._longitudinal_config, session_id)
             signal_set = signal_engine.generate(analyses)
             alerts = alert_engine.evaluate(signal_set)
             snapshots.append(HistoricalSnapshot(

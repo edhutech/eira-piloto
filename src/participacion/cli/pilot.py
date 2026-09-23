@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         result = PilotRunner(
             config,
             PilotSources(google_source.scores, attendance_table, participant_resolver, applicability,
-                         participant_ids=lambda: [item.participant_id for item in participants],
+                          participant_ids=lambda: [item.participant_id for item in participants if item.role == "participant"],
                          participation_statuses=google_source.statuses),
         ).run()
         report = _aggregate(result)

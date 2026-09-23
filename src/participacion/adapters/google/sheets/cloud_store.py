@@ -20,7 +20,7 @@ class GoogleSheetsJsonStore:
     """Small key/value JSON store backed by a dedicated Google Sheet tab."""
 
     def __init__(self, service: Any, spreadsheet_id: str, sheet_name: str,
-                 max_attempts: int = 3, max_value_bytes: int = 900_000):
+                 max_attempts: int = 3, max_value_bytes: int = 40_000):
         self.service = service
         self.spreadsheet_id = spreadsheet_id
         self.sheet_name = sheet_name
@@ -85,7 +85,7 @@ class GoogleSheetsJsonStore:
         encoded = json.dumps(value, ensure_ascii=False, sort_keys=True)
         if len(encoded.encode("utf-8")) > self.max_value_bytes:
             raise ValueError(
-                f"{self.sheet_name} {normalized} supera el límite de {self.max_value_bytes} bytes"
+                f"cloud state/config exceeds single-cell limit ({self.sheet_name} {normalized}, {self.max_value_bytes} bytes; límite de una celda)"
             )
         self.ensure()
         values = self.read_values()

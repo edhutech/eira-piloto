@@ -6,6 +6,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from ..core.models import ProgramInspection, ProgramRecord, SessionInspection
 from ..core.ranking import ProgramRanking, build_program_ranking
+from ..core.countability import COUNTABILITY_RULESET_VERSION
 from .events import AddonResult, ApplicationEvent, ProgramAddon, ProgramAddonContext
 from .session_processor import SessionProcessResult, SessionProcessStatus, SessionProcessor
 from .ports.contracts import StateStore
@@ -142,7 +143,7 @@ class ProgramRunner:
                     for item in session_results if item.status is not SessionProcessStatus.SKIPPED
                 }
                 dependencies.control_repository.reconcile(
-                    inspection.sessions, session_statuses, processed_at)
+                    inspection.sessions, session_statuses, processed_at, session_results)
             except (OSError, RuntimeError, ValueError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
 
@@ -151,6 +152,11 @@ class ProgramRunner:
         try:
             participants = dependencies.participant_repository.load()
             scores = dependencies.session_results_repository.load_scores()
+            current_processed = {
+                session.session_number for session in program.sessions
+                if session_statuses.get(session.session_number) == "PROCESSED"
+            }
+            scores = [score for score in scores if score.session_number in current_processed]
             ranking: ProgramRanking = build_program_ranking(participants, scores)
             write_result = dependencies.ranking_repository.persist(ranking, participants)
             ranking_changed = str(getattr(write_result, "status", "REPLACE")) != "NOOP"
@@ -231,6 +237,7 @@ class ProgramRunner:
             return _SessionDecision(True, fingerprints)
         if (status in {"PROCESSED", "INCOMPLETE"}
                 and previous.get("processing_version") == PROCESSING_PIPELINE_VERSION
+                and previous.get("countability_version", COUNTABILITY_RULESET_VERSION) == COUNTABILITY_RULESET_VERSION
                 and previous.get("files", {}) == fingerprints):
             return _SessionDecision(False, fingerprints)
         return _SessionDecision(True, fingerprints)
@@ -244,5 +251,6 @@ class ProgramRunner:
             "folder_id": inspection.session.state_key,
             "status": status,
             "processing_version": PROCESSING_PIPELINE_VERSION,
+            "countability_version": COUNTABILITY_RULESET_VERSION,
             "files": dict(fingerprints),
         }

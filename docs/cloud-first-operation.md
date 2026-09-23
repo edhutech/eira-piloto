@@ -42,7 +42,10 @@ A normal onboarding conversation is:
 2. Ask for the program name and number/order of sessions when they cannot be
    derived safely.
 3. Ask for an official roster / attendance source if one exists. The source
-   is optional; without an official roster Eira uses deterministic auto mode
+   is optional; without an official roster Eira uses auto mode. Auto IDs are
+   opaque UUID-derived identities persisted by the cloud workbook; once written
+   they remain stable there, while rebuilding from scratch without that workbook
+   can generate different IDs. Scoring and configured rules remain deterministic.
    over session evidence.
 4. Inspect that Google Sheet and identify candidate tabs and columns when a
    source was provided.

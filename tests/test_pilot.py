@@ -124,6 +124,62 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(result.snapshots[1].alerts[0].evaluation_status, AlertEvaluationStatus.INSUFFICIENT_DATA)
         self.assertIsNone(result.snapshots[1].alerts[0].level)
 
+    def test_historical_observation_is_not_currently_evaluable(self) -> None:
+        raw = self._config().to_dict()
+        raw.pop("attendance")
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "person@example.test",
+        }]), match_email=True)
+        scores = (ParticipantSessionScore(1, "participant-1", 1, 1, 0, 0, 0, Decimal("1"), True),)
+        result = PilotRunner(PilotConfig.from_dict(raw), PilotSources(
+            lambda: scores, None, resolver, participant_ids=lambda: ("participant-1",),
+            participation_statuses=lambda: {"1": "PROCESSED", "2": "INCOMPLETE"},
+        )).run()
+        self.assertEqual(result.snapshots[1].alerts[0].evaluation_status, AlertEvaluationStatus.INSUFFICIENT_DATA)
+
+    def test_stale_silence_signal_is_not_current_when_as_of_has_no_observation(self) -> None:
+        raw = self._config().to_dict()
+        raw.pop("attendance")
+        raw["session_mapping"]["S3"] = {"session_id": "session-3", "session_order": 3}
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "person@example.test",
+        }]), match_email=True)
+        scores = tuple(ParticipantSessionScore(i, "participant-1", 0, 0, 0, 0, 0, Decimal("0"), True)
+                       for i in (1, 2))
+        class UnknownThirdSession:
+            def is_applicable(self, participant_id, session_id):
+                return ApplicabilityResult(ApplicabilityStatus.UNKNOWN if session_id == "session-3"
+                                           else ApplicabilityStatus.APPLICABLE)
+        result = PilotRunner(PilotConfig.from_dict(raw), PilotSources(
+            lambda: scores, None, resolver, UnknownThirdSession(), participant_ids=lambda: ("participant-1",),
+            participation_statuses=lambda: {"1": "PROCESSED", "2": "PROCESSED", "3": "PROCESSED"},
+        )).run()
+        self.assertEqual(result.snapshots[1].alerts[0].level, AlertLevel.OBSERVAR)
+        self.assertEqual(result.snapshots[2].alerts[0].evaluation_status, AlertEvaluationStatus.INSUFFICIENT_DATA)
+
+    def test_pilot_v1_rejects_noncanonical_streak_policy(self) -> None:
+        raw = self._config().to_dict()
+        raw["signals"]["participation_silence_streak"]["enabled"] = "false"
+        with self.assertRaises(ValueError):
+            PilotConfig.from_dict(raw)
+
+    def test_scores_outside_pilot_participant_universe_are_excluded(self) -> None:
+        raw = self._config().to_dict()
+        raw.pop("attendance")
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([
+            {"participant_id": "participant-1", "nombre": "Synthetic Participant", "correo": "p@example.test"},
+            {"participant_id": "facilitator-1", "nombre": "Synthetic Facilitator", "correo": "f@example.test",
+             "role": "facilitator"},
+        ]), match_email=True)
+        scores = tuple(ParticipantSessionScore(session, person, 0, 0, 0, 0, 0, Decimal("0"), True)
+                       for session in (1, 2) for person in ("participant-1", "facilitator-1"))
+        result = PilotRunner(PilotConfig.from_dict(raw), PilotSources(
+            lambda: scores, None, resolver,
+            participant_ids=lambda: ("participant-1",),
+            participation_statuses=lambda: {"1": "PROCESSED", "2": "PROCESSED"},
+        )).run()
+        self.assertEqual({alert.participant_id for alert in result.snapshots[-1].alerts}, {"participant-1"})
+
     def test_invalid_silence_level_is_rejected(self) -> None:
         raw = self._config().to_dict()
         raw["alerts"]["silence_level"] = "CRITICO"

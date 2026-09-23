@@ -99,7 +99,8 @@ class GoogleSheetsControlRepository:
         return "REPLACE" if updates or inserts else "NOOP"
 
     def reconcile(self, inspections: Sequence[SessionInspection],
-                  statuses: Mapping[int, str], processed_at: Mapping[int, str]) -> str:
+                  statuses: Mapping[int, str], processed_at: Mapping[int, str],
+                  session_results: Sequence[Any] = ()) -> str:
         values = self.read_values()
         if not values:
             return "NOOP"
@@ -124,18 +125,32 @@ class GoogleSheetsControlRepository:
                 raise ValueError(
                     f"Control no contiene la sesión configurada {number}; ejecuta reconciliación estructural"
                 )
-            evidence = set(inspection.evidence_contexts.values())
-            desired = {
-                "transcript_status": "present" if any(item and item.evidence_type == "transcript" for item in evidence) else "missing",
-                "chat_status": "present" if any(item and item.evidence_type == "chat" for item in evidence) else "missing",
-            }
             current = values[sheet_row - 1]
+            status = statuses.get(number)
+            session_result = next((item for item in session_results
+                                   if item.session_number == number), None)
+            skipped = (session_result is not None and
+                       getattr(session_result.status, "value", session_result.status) == "SKIPPED")
+            processed_result = session_result if not skipped else None
+            transcript_present: bool | None
+            chat_present: bool | None
+            if processed_result is not None:
+                transcript_present = len(processed_result.transcript_files) == 1
+                chat_present = len(processed_result.chat_files) == 1
+            elif skipped or status == "SKIPPED":
+                transcript_present = chat_present = None
+            else:
+                evidence = set(inspection.evidence_contexts.values())
+                transcript_present = any(item.evidence_type == "transcript" for item in evidence)
+                chat_present = any(item.evidence_type == "chat" for item in evidence)
+            desired = {} if transcript_present is None else {
+                "transcript_status": "present" if transcript_present else "missing",
+                "chat_status": "present" if chat_present else "missing"}
             for field, value in desired.items():
                 column = positions[field]
                 old = str(current[column]).strip() if column < len(current) else ""
                 if old != value:
                     updates.append({"range": f"'{self.sheet_name}'!{_column(column + 1)}{sheet_row}", "values": [[value]]})
-            status = statuses.get(number)
             if status and status != "SKIPPED":
                 column = positions["processing_status"]
                 old = str(current[column]).strip() if column < len(current) else ""

@@ -50,7 +50,10 @@ class FakeParticipants:
 
 class FakeSessionResults:
     def __init__(self):
-        self.values = [ParticipantSessionScore(1, "p1", 1, 1, 0, 0, 0, Decimal("1"), True)]
+        self.values = [
+            ParticipantSessionScore(1, "p1", 1, 1, 0, 0, 0, Decimal("1"), True),
+            ParticipantSessionScore(2, "p1", 5, 5, 0, 0, 0, Decimal("5"), True),
+        ]
     def load_scores(self):
         return list(self.values)
 
@@ -66,8 +69,8 @@ class FakeRanking:
 class FakeControl:
     def __init__(self):
         self.calls = []
-    def reconcile(self, inspections, statuses, processed_at):
-        self.calls.append((inspections, dict(statuses), dict(processed_at)))
+    def reconcile(self, inspections, statuses, processed_at, session_results=()):
+        self.calls.append((inspections, dict(statuses), dict(processed_at), tuple(session_results)))
 
 
 class ProgramRunnerTests(unittest.TestCase):
@@ -177,6 +180,16 @@ class ProgramRunnerTests(unittest.TestCase):
         self.assertEqual(len(ranking.calls), 1)
         self.assertEqual(result.ranking_entries, 1)
         self.assertFalse(result.ranking_changed)
+
+    def test_ranking_excludes_score_for_currently_incomplete_session(self):
+        p = program()
+        outcomes = {
+            1: SessionProcessResult(1, SessionProcessStatus.PROCESSED),
+            2: SessionProcessResult(2, SessionProcessStatus.INCOMPLETE),
+        }
+        runner, _, ranking, _ = self.make_runner(empty_state(), inspection_for(p), FakeProcessor(outcomes))
+        runner.run()
+        self.assertEqual(ranking.calls[0][0].entries[0].score_total, Decimal("1"))
 
     def test_addon_only_change_does_not_emit_program_updated(self):
         class Addon:

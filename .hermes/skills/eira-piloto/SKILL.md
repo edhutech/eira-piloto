@@ -133,8 +133,11 @@ No crear adapters con nombres de clientes ni copiar archivos reales al repo.
 
 ## Sesiones e identidad
 
-La identidad externa se resuelve contra el roster oficial mediante coincidencia
-exacta y determinista. Nunca se crean participantes nuevos durante el piloto.
+En official/import mode no se inventan identidades: cada identidad externa debe
+resolverse mediante la política exacta y determinista configurada. En auto mode,
+la política permite crear participantes a partir de evidencia resoluble; sus IDs
+son opacos y, una vez escritos, la autoridad cloud los conserva estables. Si se
+reconstruye el sistema desde cero sin el workbook, los IDs auto pueden diferir.
 
 La sesión externa debe mapearse explícitamente a:
 
@@ -170,8 +173,9 @@ recovery permanecen desactivados hasta que exista una decisión explícita.
 
 ## Resultados operacionales
 
-El dry-run puede informar de forma agregada, pero `eira-run` debe devolver además
-`summary` y `cases` derivados del último snapshot:
+El dry-run informa de forma agregada y `eira-run` reporta además `summary`,
+`as_of`, Signals, Alerts, issues/attention y `cases` derivados del último
+snapshot:
 
 - CanonicalFacts válidos e issues por categoría;
 - identidades resueltas, no encontradas y ambiguas;

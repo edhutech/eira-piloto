@@ -135,6 +135,13 @@ class RosterImporter:
 
 
 def _matches(record: RosterRecord, people: Sequence[Participant]) -> tuple[list[Participant], str]:
+    if record.participant_id:
+        candidates = [p for p in people if p.participant_id == record.participant_id]
+        if candidates:
+            return candidates, "participant_id explícito"
+    if record.participant_id:
+        # An explicit stable identity is authoritative; never fall through to another person.
+        return [], "participant_id sin coincidencia"
     email = record.correo.strip().casefold()
     if email:
         candidates = [p for p in people if p.correo.strip().casefold() == email]
@@ -142,8 +149,10 @@ def _matches(record: RosterRecord, people: Sequence[Participant]) -> tuple[list[
             return candidates, "email exacto"
     name = strict_name_key(record.nombre)
     candidates = [p for p in people if strict_name_key(p.nombre) == name]
-    if candidates:
+    if len(candidates) == 1:
         return candidates, "nombre exacto"
+    if len(candidates) > 1:
+        return candidates, "nombre exacto ambiguo"
     candidates = [p for p in people if any(strict_name_key(alias) == name for alias in p.aliases or [])]
     return candidates, "alias exacto"
 
@@ -165,6 +174,8 @@ def _needs_update(person: Participant, record: RosterRecord) -> bool:
 
 
 def _stable_official_id(record: RosterRecord) -> str:
+    if record.participant_id and record.participant_id.strip():
+        return record.participant_id.strip()
     key = record.correo.strip().casefold() or strict_name_key(record.nombre)
     return "participant_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
 

@@ -115,6 +115,7 @@ class RetrospectiveEvaluator:
             participant_alerts = [
                 alert for snapshot in prior for alert in snapshot.alerts
                 if alert.participant_id == outcome.participant_id
+                and getattr(alert.level, "value", None) in {"OBSERVAR", "CRÍTICO"}
             ]
             matched_outcome_participants.add(outcome.participant_id)
             if participant_signals:

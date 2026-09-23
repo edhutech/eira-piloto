@@ -57,12 +57,18 @@ class PilotConfig:
         )
         signals = _mapping(raw.get("signals"), "signals")
         silence = _mapping(signals.get("participation_silence_streak", {}), "signals.participation_silence_streak")
-        minimum_streak = int(silence.get("minimum_streak", 2))
-        if minimum_streak < 1:
-            raise ValueError("minimum_streak debe ser positivo")
+        signal_version = _text(signals.get("version", "pilot.v1"), "signals.version")
+        enabled = silence.get("enabled", False)
+        minimum_raw = silence.get("minimum_streak", 2)
+        minimum_streak = minimum_raw if isinstance(minimum_raw, int) and not isinstance(minimum_raw, bool) else -1
         alerts = _mapping(raw.get("alerts"), "alerts")
+        alert_version = _text(alerts.get("version", "pilot.v1"), "alerts.version")
         silence_level = alerts.get("silence_level")
-        if silence_level is not None and str(silence_level).strip().upper() != "OBSERVAR":
+        if signal_version != "pilot.v1" or alert_version != "pilot.v1":
+            raise ValueError("pilot.v1 requiere signals.version y alerts.version = pilot.v1")
+        if enabled is not True or minimum_streak != 2:
+            raise ValueError("pilot.v1 requiere enabled=true boolean y minimum_streak=2")
+        if silence_level is not None and silence_level != "OBSERVAR":
             raise ValueError("alerts.silence_level solo puede ser OBSERVAR")
         return cls(
             program_id=_text(program.get("program_id"), "program.program_id"),
@@ -75,10 +81,10 @@ class PilotConfig:
                 if attendance is not None else None),
             session_mapping=sessions,
             longitudinal=longitudinal,
-            signal_version=_text(signals.get("version", "pilot.v1"), "signals.version"),
-            silence_enabled=bool(silence.get("enabled", False)),
+            signal_version=signal_version,
+            silence_enabled=enabled,
             silence_minimum_streak=minimum_streak,
-            alert_version=_text(alerts.get("version", "pilot.v1"), "alerts.version"),
+            alert_version=alert_version,
             participation_coverage=_coverage(_mapping(raw.get("participation"), "participation").get("coverage", "UNKNOWN")),
             attendance_coverage=_coverage(attendance.get("coverage", "UNKNOWN")) if attendance is not None else SourceCoverage.UNKNOWN,
             attendance_identity_path=(str(attendance.get("identity_path", "")).strip()

@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 from participacion.adapters.google.sheets.operational import GoogleSheetsOperationalRepository
 from participacion.adapters.google.sheets.operational import OPERATIONAL_HEADERS
+from participacion.adapters.google.sheets.control import GoogleSheetsControlRepository
+from participacion.adapters.google.sheets.schema import CONTROL_HEADERS
 from participacion.adapters.pilot.google_participation_source import build_participant_resolver
 from participacion.application.init_program import build_plan
 from participacion.application.pilot.config import PilotConfig
@@ -194,6 +196,48 @@ class OperationalFlowTests(unittest.TestCase):
         self.assertEqual(repository.persist(view1), "REPLACE")
         self.assertEqual(repository.persist(view2), "NOOP")
         self.assertEqual(repository.persist(view3), "REPLACE")
+
+    def test_control_preserves_evidence_on_skipped_processing_and_hides_ambiguous_files(self):
+        class Values:
+            def __init__(self, values):
+                self.data = values
+                self.writes = []
+            def get(self, **kwargs):
+                return _Request({"values": self.data})
+            def batchUpdate(self, **kwargs):
+                self.writes.append(kwargs)
+                return _Request()
+        class Service:
+            def __init__(self, values):
+                self.values_api = values
+            def spreadsheets(self):
+                return self
+            def values(self):
+                return self.values_api
+
+        row = [""] * len(CONTROL_HEADERS)
+        row[CONTROL_HEADERS.index("session_number")] = 1
+        row[CONTROL_HEADERS.index("transcript_status")] = "present"
+        row[CONTROL_HEADERS.index("chat_status")] = "present"
+        row[CONTROL_HEADERS.index("processing_status")] = "PROCESSED"
+        values = Values([CONTROL_HEADERS, row])
+        repository = GoogleSheetsControlRepository(Service(values), "sheet")
+        session = SessionRecord(1, "S01", "folder")
+        inspection = SessionInspection(session)
+        skipped = SessionProcessResult(1, SessionProcessStatus.SKIPPED)
+        repository.reconcile([inspection], {1: "PROCESSED"}, {}, [skipped])
+        self.assertEqual(values.writes, [])
+
+        ambiguous = SessionProcessResult(
+            1, SessionProcessStatus.NEEDS_REVIEW,
+            transcript_files=("one", "two"), chat_files=("chat",),
+        )
+        repository.reconcile([inspection], {1: "NEEDS_REVIEW"}, {}, [ambiguous])
+        updates = values.writes[-1]["body"]["data"]
+        written = {item["range"].split("!")[1]: item["values"][0][0]
+                   for item in updates}
+        self.assertEqual(written["D2"], "missing")
+        self.assertNotIn("E2", written)
 
     def test_cloud_dependencies_disable_legacy_views_and_addons(self):
         tracking = MagicMock()

@@ -37,6 +37,7 @@ from ..application.pilot.config import validate_session_mapping
 from ..application.pilot.runner import PilotRunner, PilotSources, RosterApplicabilityResolver
 from ..application.external_data.mapping import MappingStatus, map_table
 from ..application.modules.resolution import ParticipantResolverAdapter, ResolutionStatus
+from ..application.modules.models import ExternalPair, SourceCoverage
 from ..application.pilot.operational import build_operational_view
 from ..application.registry import program_from_dict, save_programs
 from ..application.roster import RosterImporter, RosterRecord, roster_records_from_rows, roster_records_to_participants
@@ -122,9 +123,11 @@ def _preserve_unspecified_roster_fields(
     columns: set[str],
 ) -> list[RosterRecord]:
     by_email = {item.correo.strip().casefold(): item for item in existing if item.correo.strip()}
+    by_id = {item.participant_id: item for item in existing}
     result: list[RosterRecord] = []
     for record in records:
-        current = by_email.get(record.correo.strip().casefold())
+        current = (by_id.get(record.participant_id) if record.participant_id else None)
+        current = current or by_email.get(record.correo.strip().casefold())
         if current is None:
             result.append(record)
             continue
@@ -174,6 +177,8 @@ def _default_pilot(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_pilot(raw: Mapping[str, Any] | None, record: Mapping[str, Any]) -> dict[str, Any]:
+    if raw is not None and not isinstance(raw, Mapping):
+        raise ValueError("spec.pilot debe ser un objeto cuando se configura")
     pilot = dict(raw or _default_pilot(record))
     pilot["program"] = {
         "program_id": record["program_id"],
@@ -485,6 +490,7 @@ def _find_sheet_in_folder(
         return None
 
     prefix = f"Participación - {program_name}".strip()
+    canonical_name = f"Participación - {program_name} - Eira Piloto"
     legacy_matches: list[str] = []
     required = {"Participantes", "Control", "Sesiones", "Programa"}
     for item in candidates:
@@ -493,7 +499,7 @@ def _find_sheet_in_folder(
         if not sheet_id or not name.startswith(prefix):
             continue
         titles = _sheet_titles(sheets, sheet_id)
-        if required.issubset(titles):
+        if name == canonical_name or required.issubset(titles):
             legacy_matches.append(sheet_id)
     if len(legacy_matches) == 1:
         return legacy_matches[0]
@@ -515,18 +521,27 @@ def setup_main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         spec = _load_json_arg(args.spec)
+        for field in ("known_external", "attendance_identity"):
+            if field in spec and not isinstance(spec[field], list):
+                raise ValueError(f"spec.{field} debe ser una lista")
+        for field in ("roster", "pilot"):
+            if field in spec and not isinstance(spec[field], Mapping):
+                raise ValueError(f"spec.{field} debe ser un objeto cuando se configura")
         program_raw = spec.get("program")
         if not isinstance(program_raw, Mapping):
             raise ValueError("spec.program debe ser un objeto")
         sessions = program_raw.get("sessions")
         if not isinstance(sessions, list) or not sessions:
             raise ValueError("spec.program.sessions requiere una lista no vacía")
+        if any(not isinstance(item, Mapping) for item in sessions):
+            raise ValueError("cada elemento de spec.program.sessions debe ser un objeto")
+        if any("evidence_sources" in item and not isinstance(item["evidence_sources"], list)
+               for item in sessions):
+            raise ValueError("spec.program.sessions[].evidence_sources debe ser una lista")
         program_name = str(program_raw.get("program_name", "")).strip()
         if not program_name:
             raise ValueError("spec.program.program_name es obligatorio")
         roster_raw = spec.get("roster")
-        if roster_raw is not None and not isinstance(roster_raw, Mapping):
-            raise ValueError("spec.roster debe ser un objeto cuando se configura")
         default_mode = "official" if isinstance(roster_raw, Mapping) else "auto"
         participant_mode = str(program_raw.get("participant_mode", default_mode)).strip()
         if participant_mode not in {"official", "auto"}:
@@ -575,7 +590,7 @@ def setup_main(argv: list[str] | None = None) -> int:
             existing_sheet_id,
         )
         pilot = _normalize_pilot(
-            spec.get("pilot") if isinstance(spec.get("pilot"), Mapping) else None,
+            spec.get("pilot"),
             candidate_record,
         )
         candidate_program = program_from_dict(candidate_record)
@@ -588,10 +603,6 @@ def setup_main(argv: list[str] | None = None) -> int:
             _validate_program_view_schema(sheets, existing_sheet_id)
             _validate_legacy_processed_sessions(sheets, existing_sheet_id, sessions)
             _validate_workbook_capabilities(drive, existing_sheet_id)
-        _validate_rule_lists({
-            "known_external": list(spec.get("known_external", [])),
-            "attendance_identity": list(spec.get("attendance_identity", [])),
-        })
         known_external = spec.get("known_external", [])
         attendance_identity = spec.get("attendance_identity", [])
         if not isinstance(known_external, list) or not isinstance(attendance_identity, list):
@@ -640,8 +651,9 @@ def setup_main(argv: list[str] | None = None) -> int:
         }
         if isinstance(roster_raw, Mapping):
             candidate_bundle["roster"] = dict(roster_raw)
-        if len(json.dumps(candidate_bundle, ensure_ascii=False).encode("utf-8")) > 900_000:
-            raise ValueError("La configuración cloud supera el límite de 900 KB")
+        if len(json.dumps(candidate_bundle, ensure_ascii=False).encode("utf-8")) > 40_000:
+            raise ValueError("cloud state/config exceeds single-cell limit (40000 bytes)")
+        _validate_rule_lists(candidate_bundle)
         print(f"Programa: {program_name}")
         print(f"Carpeta Drive: {args.drive_folder}")
         if participant_mode == "official":
@@ -694,6 +706,13 @@ def setup_main(argv: list[str] | None = None) -> int:
     except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
         print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        from ..adapters.google.errors import is_expected_google_error, format_google_error
+        if is_expected_google_error(exc):
+            print(f"RESULT: ERROR — {format_google_error(exc)}", file=sys.stderr)
+            return 1
+        print(f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}", file=sys.stderr)
+        raise
 
 
 def _refresh_live_roster(sheets: Any, sheet_id: str, roster_raw: Mapping[str, Any]) -> dict[str, int]:
@@ -799,8 +818,32 @@ def _validate_auto_attendance_resolution(
         result = policy.resolve(external_id)
         if result.status is not ResolutionStatus.RESOLVED:
             raise ValueError(
-                "Attendance en modo auto tiene una identidad no resoluble: " + external_id
+                "Attendance en modo auto contiene una identidad externa no resoluble"
             )
+
+
+def _known_attendance_expected_pairs(
+    participants: list[Participant], resolver: Any, identity_rows: list[Mapping[str, Any]],
+    session_mapping: Mapping[str, Any], coverage: SourceCoverage,
+) -> tuple[ExternalPair, ...]:
+    if coverage is not SourceCoverage.EXHAUSTIVE:
+        return ()
+    eligible = [item for item in participants if item.role == "participant"]
+    explicit_ids = [str(item.get("external_id", "") or "").strip() for item in identity_rows]
+    external_by_participant: dict[str, str] = {}
+    for participant in eligible:
+        candidates = [participant.correo, *explicit_ids]
+        matches = sorted({external.strip() for external in candidates if external.strip()
+                          and (resolved := resolver.resolve(external)).status is ResolutionStatus.RESOLVED
+                          and resolved.internal_id == participant.participant_id})
+        if len(matches) != 1:
+            return ()
+        external_by_participant[participant.participant_id] = matches[0]
+    if len(external_by_participant) != len(eligible) or not session_mapping:
+        return ()
+    return tuple(ExternalPair(external_id, str(session_external_id))
+                 for external_id in external_by_participant.values()
+                 for session_external_id in session_mapping)
 
 
 def _write_known_external_csv(path: Path, rows: list[Mapping[str, Any]]) -> None:
@@ -914,11 +957,28 @@ def run_main(argv: list[str] | None = None) -> int:
                     item.session_id: item.session_order for item in pilot.session_mapping.values()
                 }
                 applicability = RosterApplicabilityResolver(participants, session_orders)
+                expected_attendance_pairs = _known_attendance_expected_pairs(
+                    participants, participant_resolver, identity_rows,
+                    pilot.session_mapping, pilot.attendance_coverage,
+                )
                 attendance_table = None
                 if pilot.attendance_source is not None:
                     table = _read_attendance_table(
                         temp / "cloud.json", pilot.attendance_source, sheets
                     )
+                    if pilot.attendance_mapping is None:
+                        raise ValueError("Attendance mapping ausente")
+                    live_mapping = map_table(table, pilot.attendance_mapping)
+                    if live_mapping.status is not MappingStatus.VALID:
+                        issue_codes: dict[str, int] = {}
+                        for issue in live_mapping.issues:
+                            code = str(getattr(getattr(issue, "code", None), "value", getattr(issue, "code", "MAPPING")))
+                            issue_codes[code] = issue_codes.get(code, 0) + 1
+                        raise ValueError("Attendance live requiere revisión: " + ", ".join(
+                            f"{code}={count}" for code, count in sorted(issue_codes.items())))
+                    if program.participant_mode == "auto":
+                        _validate_auto_attendance_resolution(
+                            identity_rows, live_mapping, [item for item in participants if item.role == "participant"])
                     attendance_table = lambda table=table: table
                 result = PilotRunner(
                     pilot,
@@ -927,8 +987,9 @@ def run_main(argv: list[str] | None = None) -> int:
                         attendance_table,
                         participant_resolver,
                         applicability,
-                        participant_ids=lambda: [item.participant_id for item in participants],
+                        participant_ids=lambda: [item.participant_id for item in participants if item.role == "participant"],
                         participation_statuses=google_source.statuses,
+                        attendance_expected_pairs=expected_attendance_pairs,
                     ),
                 ).run()
                 operational_view = build_operational_view(result)
@@ -945,6 +1006,12 @@ def run_main(argv: list[str] | None = None) -> int:
                         "cases": [case.to_dict() for case in operational_view.cases],
                         "signal_counts": dict(operational_view.signal_counts),
                         "as_of_session_id": operational_view.as_of_session_id,
+                        "alerts": dict(operational_view.summary()),
+                        "issue_counts": result.issue_counts(),
+                        "attention_sessions": sum(
+                            value in {"INCOMPLETE", "NEEDS_REVIEW"}
+                            for value in google_source.statuses().values()
+                        ),
                     },
                 }, ensure_ascii=False, indent=2, sort_keys=True))
                 flow_succeeded = True
@@ -953,11 +1020,13 @@ def run_main(argv: list[str] | None = None) -> int:
         print(f"RESULT: ERROR — {type(exc).__name__}: {exc}", file=sys.stderr)
         exit_code = 1
     except Exception as exc:
-        print(
-            f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-        )
-        raise
+        from ..adapters.google.errors import is_expected_google_error, format_google_error
+        if is_expected_google_error(exc):
+            print(f"RESULT: ERROR — {format_google_error(exc)}", file=sys.stderr)
+            exit_code = 1
+        else:
+            print(f"RESULT: ERROR — unexpected {type(exc).__name__}: {exc}", file=sys.stderr)
+            raise
     finally:
         if lease is not None:
             try:
@@ -975,7 +1044,11 @@ def run_main(argv: list[str] | None = None) -> int:
                         file=sys.stderr,
                     )
         if flow_succeeded and exit_code == 0:
-            print("RESULT: SUCCESS — Eira flow completed successfully.")
+            attention = sum(item.sessions_incomplete + item.sessions_needs_review for item in sync_result) if "sync_result" in locals() else 0
+            if attention:
+                print(f"RESULT: SUCCESS WITH ATTENTION — Eira flow completed; {attention} session(s) require attention.")
+            else:
+                print("RESULT: SUCCESS — Eira flow completed successfully.")
 
     return exit_code
 

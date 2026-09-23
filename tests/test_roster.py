@@ -90,3 +90,19 @@ class RosterTests(unittest.TestCase):
         created_plan = RosterImporter(created_repo).dry_run([RosterRecord("Bea", "bea@example.com", role="other")])
         RosterImporter(created_repo).apply(created_plan)
         self.assertEqual(created_repo.people[0].role, "participant")
+
+    def test_stable_participant_id_matches_across_email_change(self):
+        person = Participant("stable-1", "Synthetic Person", "old@example.test", ["Old alias"],
+                             enrollment_status="inactive", start_session=2, end_session=5)
+        repo = FakeParticipantRepository([person])
+        record = RosterRecord("Synthetic Person", "new@example.test", participant_id="stable-1")
+        from participacion.cli.cloud import _preserve_unspecified_roster_fields
+        preserved = _preserve_unspecified_roster_fields(
+            [record], repo.load(), {"participant_id", "nombre", "correo"})
+        plan = RosterImporter(repo).dry_run(preserved)
+        RosterImporter(repo).apply(plan)
+        self.assertEqual(plan.items[0].action, RosterAction.UPDATE)
+        self.assertEqual(repo.updated["stable-1"]["correo"], "new@example.test")
+        self.assertEqual(repo.updated["stable-1"]["aliases"], "Old alias")
+        self.assertEqual(repo.updated["stable-1"]["start_session"], 2)
+        self.assertEqual(repo.updated["stable-1"]["end_session"], 5)

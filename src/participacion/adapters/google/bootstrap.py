@@ -216,8 +216,14 @@ def _ensure_sheet(sheets: Any, drive: Any, plan: InitPlan, children: list[dict[s
     # Un workbook nuevo recibe todas las hojas. En uno existente solo se
     # inicializan las hojas que acaban de agregarse; nunca se sobrescriben
     # datos ya presentes.
-    target_sheets = list(values) if newly_created else added_sheets
+    target_sheets = list(values) if newly_created else list(values)
     for sheet_name in target_sheets:
+        if not newly_created:
+            existing_values = sheets.spreadsheets().values().get(
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A:ZZ"
+            ).execute().get("values", [])
+            if existing_values:
+                continue
         rows = values.get(sheet_name, [])
         if rows:
             sheets.spreadsheets().values().update(

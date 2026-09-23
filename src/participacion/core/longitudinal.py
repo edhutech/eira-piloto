@@ -43,6 +43,7 @@ class StreakAnalysis:
     current_length: int
     maximum_length: int
     evaluated_count: int
+    current_session_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,14 @@ class LongitudinalAnalysis:
     previous_recent_session_ids: tuple[str, ...] = ()
     previous_recent_average: float | None = None
     current_status: ObservationStatus | None = None
+    current_evaluable: bool = False
 
 
 def analyze_longitudinal(
     observations: Iterable[Observation],
     session_order: Mapping[str, int],
     config: LongitudinalConfig,
+    as_of_session_id: str | None = None,
 ) -> tuple[LongitudinalAnalysis, ...]:
     _validate_session_order(session_order)
     groups: dict[tuple[str, str, str], list[Observation]] = {}
@@ -88,7 +91,7 @@ def analyze_longitudinal(
         groups.setdefault(group_key, []).append(observation)
 
     results = [
-        _analyze_group(group_key, values, session_order, config)
+        _analyze_group(group_key, values, session_order, config, as_of_session_id)
         for group_key, values in sorted(groups.items())
     ]
     return tuple(results)
@@ -99,6 +102,7 @@ def _analyze_group(
     observations: Sequence[Observation],
     session_order: Mapping[str, int],
     config: LongitudinalConfig,
+    as_of_session_id: str | None = None,
 ) -> LongitudinalAnalysis:
     ordered = sorted(observations, key=lambda item: session_order[item.session_id])
     applicable = [item for item in ordered if item.status is not ObservationStatus.NOT_APPLICABLE]
@@ -118,7 +122,10 @@ def _analyze_group(
     numeric_series = [(_number(item.value), index) for index, item in enumerate(ordered)
                       if item.status is ObservationStatus.OBSERVED and _number(item.value) is not None]
     trend = _trend(numeric_series, config.trend_threshold) if sufficient else "insufficient_data"
-    streaks = tuple(_streak(rule, applicable) for rule in config.streak_rules)
+    current_id = as_of_session_id or (ordered[-1].session_id if ordered else "")
+    current = next((item for item in ordered if item.session_id == current_id), None)
+    evaluable_series = applicable if current is not None else []
+    streaks = tuple(_streak(rule, evaluable_series) for rule in config.streak_rules)
     return LongitudinalAnalysis(
         participant_id=group_key[0],
         dimension=group_key[1],
@@ -139,7 +146,8 @@ def _analyze_group(
         recent_session_ids=tuple(item.session_id for item in recent),
         previous_recent_session_ids=tuple(item.session_id for item in previous_recent),
         previous_recent_average=previous_recent_average,
-        current_status=ordered[-1].status if ordered else None,
+        current_status=current.status if current else None,
+        current_evaluable=current is not None and current.status is ObservationStatus.OBSERVED,
     )
 
 
@@ -192,15 +200,19 @@ def _streak(rule: StreakRule, observations: Sequence[Observation]) -> StreakAnal
     current = 0
     maximum = 0
     evaluated = 0
+    current_ids: list[str] = []
     for observation in observations:
         result = rule.predicate(observation)
         if result is None:
             current = 0
+            current_ids = []
             continue
         evaluated += 1
         if result:
             current += 1
+            current_ids.append(observation.session_id)
             maximum = max(maximum, current)
         else:
             current = 0
-    return StreakAnalysis(rule.name, current, maximum, evaluated)
+            current_ids = []
+    return StreakAnalysis(rule.name, current, maximum, evaluated, tuple(current_ids))
