@@ -105,14 +105,16 @@ class ParticipationModule:
             if applicability.status is ApplicabilityStatus.NOT_APPLICABLE:
                 observations.extend(self._observations(participant_id, session_id, None,
                                                        ObservationStatus.NOT_APPLICABLE, provenance))
-            elif explicit_status in {"INCOMPLETE", "NEEDS_REVIEW", "FAILED"}:
+            elif explicit_status != "PROCESSED":
                 status = (ObservationStatus.INCOMPLETE if explicit_status == "INCOMPLETE"
                           else ObservationStatus.NO_DATA)
                 observations.extend(self._observations(participant_id, session_id, None, status, provenance))
                 issues.append(ModuleIssue(
                     ModuleIssueStatus.NEEDS_REVIEW,
-                    f"SESSION_{explicit_status}",
-                    f"La sesión tiene estado explícito {explicit_status}; no se consume score histórico",
+                    f"SESSION_{explicit_status or 'STATUS_UNKNOWN'}",
+                    (f"La sesión tiene estado {explicit_status}; no se consume score histórico"
+                     if explicit_status else
+                     "No se conoce el estado de procesamiento de la sesión; no se consume score histórico"),
                     participant_id, session_id,
                 ))
             elif score is None:
@@ -122,7 +124,7 @@ class ParticipationModule:
                 elif self.config.coverage is SourceCoverage.EXHAUSTIVE:
                     observations.extend(self._observations(participant_id, session_id, None,
                                                            ObservationStatus.NO_DATA, provenance))
-            else:
+            elif explicit_status == "PROCESSED":
                 status = ObservationStatus.OBSERVED if score.scoring_complete else ObservationStatus.INCOMPLETE
                 observations.extend(self._observations(participant_id, session_id, score, status, provenance))
         return ModuleResult(tuple(observations), tuple(issues))

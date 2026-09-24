@@ -7,7 +7,8 @@ from ...application.external_data.mapping import MappingStatus, map_table
 from ...application.external_data.models import TabularTable
 from ...application.modules.attendance import AttendanceConfig, AttendanceInput, AttendanceModule
 from ...application.modules.models import (ApplicabilityResolver, ApplicabilityResult, ApplicabilityStatus,
-                                            ExternalPair, ParticipantSessionPair, SourceCoverage)
+                                            ExternalPair, ModuleIssue, ModuleIssueStatus, ParticipantSessionPair,
+                                            SourceCoverage)
 from ...application.modules.participation import ParticipationConfig, ParticipationModule
 from ...application.modules.resolution import ExternalParticipantResolver, MappingSessionResolver
 from ...core.alerts import AlertLevel
@@ -96,6 +97,13 @@ class PilotRunner:
                 if self.sources.participant_ids is None or item.participant_id in eligible_ids
             ]
             attendance_issues = tuple(attendance_result.issues)
+            if (self.config.attendance_coverage is SourceCoverage.EXHAUSTIVE
+                    and not self.sources.attendance_expected_pairs):
+                attendance_issues += (ModuleIssue(
+                    ModuleIssueStatus.NEEDS_REVIEW,
+                    "ATTENDANCE_COVERAGE_DEGRADED",
+                    "Cobertura configurada EXHAUSTIVE, efectiva UNKNOWN: no hay pares esperados explícitos",
+                ),)
             if mapping_result.status is not MappingStatus.VALID:
                 attendance_issues += tuple(mapping_result.issues)
 

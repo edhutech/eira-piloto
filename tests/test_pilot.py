@@ -10,6 +10,7 @@ from participacion.application.pilot.results import HistoricalSnapshot, PilotRes
 from participacion.application.pilot.retrospective import OutcomeRecord, RetrospectiveEvaluator
 from participacion.application.pilot.runner import PilotRunner, PilotSources
 from participacion.application.modules.models import ApplicabilityResult, ApplicabilityStatus
+from participacion.application.modules.models import ExternalPair
 from participacion.application.modules.resolution import ParticipantResolverAdapter
 from participacion.core.alerts import AlertEvaluationStatus, AlertLevel
 from participacion.core.participants import ParticipantResolver
@@ -54,6 +55,7 @@ class PilotTests(unittest.TestCase):
             participant_scores=lambda: scores,
             attendance_table=lambda: table,
             participant_resolver=resolver,
+            participation_statuses=lambda: {"1": "PROCESSED", "2": "PROCESSED"},
         )
         result = PilotRunner(self._config(), sources).run()
         self.assertEqual(result.snapshot_count, 2)
@@ -65,6 +67,43 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(first.alerts[0].level, AlertLevel.NORMAL)
         second = result.snapshots[1]
         self.assertEqual(second.as_of_session_id, "session-2")
+
+    def test_exhaustive_attendance_without_expected_pairs_degrades_with_issue(self) -> None:
+        raw = self._config().to_dict()
+        raw["attendance"]["coverage"] = "EXHAUSTIVE"
+        config = PilotConfig.from_dict(raw)
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "external-1",
+        }]), match_email=True)
+        result = PilotRunner(config, PilotSources(
+            lambda: (), lambda: TabularTable("local.xlsx", "participants", (), ()), resolver,
+        )).run()
+        issue = next(issue for issue in result.issues if issue.code == "ATTENDANCE_COVERAGE_DEGRADED")
+        self.assertEqual(issue.status.value, "NEEDS_REVIEW")
+        self.assertIn("EXHAUSTIVE", issue.message)
+        self.assertIn("UNKNOWN", issue.message)
+
+    def test_exhaustive_attendance_with_expected_pairs_remains_resolvable(self) -> None:
+        raw = self._config().to_dict()
+        raw["attendance"]["coverage"] = "EXHAUSTIVE"
+        config = PilotConfig.from_dict(raw)
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
+            "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "external-1",
+        }]), match_email=True)
+        result = PilotRunner(config, PilotSources(
+            lambda: (), lambda: TabularTable("local.xlsx", "participants", (), ()), resolver,
+            applicability_resolver=KnownApplicability(),
+            attendance_expected_pairs=(ExternalPair("external-1", "S1"),),
+        )).run()
+        self.assertNotIn("ATTENDANCE_COVERAGE_DEGRADED", {issue.code for issue in result.issues})
+        self.assertTrue(any(item.status.value == "NO_DATA" for item in result.observations))
+
+    def test_unknown_attendance_coverage_does_not_report_degradation(self) -> None:
+        resolver = ParticipantResolverAdapter(ParticipantResolver.official([]), match_email=True)
+        result = PilotRunner(self._config(), PilotSources(
+            lambda: (), lambda: TabularTable("local.xlsx", "participants", (), ()), resolver,
+        )).run()
+        self.assertNotIn("ATTENDANCE_COVERAGE_DEGRADED", {issue.code for issue in result.issues})
 
     def test_zero_observed_scores_generate_experimental_silence_alert_after_two_sessions(self) -> None:
         scores = (
@@ -78,7 +117,10 @@ class PilotTests(unittest.TestCase):
         resolver = ParticipantResolverAdapter(ParticipantResolver.official([{
             "participant_id": "participant-1", "nombre": "Synthetic Person", "correo": "external-1",
         }]), match_email=True)
-        result = PilotRunner(self._config(), PilotSources(lambda: scores, lambda: table, resolver)).run()
+        result = PilotRunner(self._config(), PilotSources(
+            lambda: scores, lambda: table, resolver,
+            participation_statuses=lambda: {"1": "PROCESSED", "2": "PROCESSED"},
+        )).run()
         self.assertEqual(result.snapshots[1].signal_set.signals[0].signal_type, "participation_silence_streak")
         self.assertEqual(result.snapshots[1].alerts[0].level, AlertLevel.OBSERVAR)
 

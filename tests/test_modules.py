@@ -69,23 +69,27 @@ class ParticipationModuleTests(unittest.TestCase):
         )
 
     def test_positive_score_is_observed(self):
-        result = self.module.build_observations([score()])
+        result = self.module.build_observations([score()], session_statuses={"1": "PROCESSED"})
         observation = result.observations[0]
         self.assertEqual((observation.dimension, observation.metric), ("participation", "participation_score"))
         self.assertEqual((observation.value, observation.status), (Decimal("1"), ObservationStatus.OBSERVED))
 
     def test_complete_zero_score_is_observed_zero(self):
-        result = self.module.build_observations([score(value=Decimal("0"))])
+        result = self.module.build_observations(
+            [score(value=Decimal("0"))], session_statuses={"1": "PROCESSED"}
+        )
         self.assertEqual(result.observations[0].status, ObservationStatus.OBSERVED)
         self.assertEqual(result.observations[0].value, Decimal("0"))
 
     def test_incomplete_score_is_incomplete_not_zero(self):
-        result = self.module.build_observations([score(value=Decimal("0"), complete=False)])
+        result = self.module.build_observations(
+            [score(value=Decimal("0"), complete=False)], session_statuses={"1": "PROCESSED"}
+        )
         self.assertEqual(result.observations[0].status, ObservationStatus.INCOMPLETE)
         self.assertIsNone(result.observations[0].value)
 
     def test_provenance_is_preserved_as_neutral_reference(self):
-        result = self.module.build_observations([score()])
+        result = self.module.build_observations([score()], session_statuses={"1": "PROCESSED"})
         self.assertEqual(result.observations[0].provenance[0].source_id, "participation-test")
 
     def test_unresolvable_session_creates_issue_without_observation(self):
@@ -135,6 +139,22 @@ class ParticipationModuleTests(unittest.TestCase):
         )
         self.assertNotEqual(result.observations[0].status, ObservationStatus.OBSERVED)
         self.assertIsNone(result.observations[0].value)
+
+    def test_unprocessed_statuses_never_consume_historical_score(self):
+        for status in ("NEEDS_REVIEW", "FAILED", "PENDING", "PROCESSING", "UNSUPPORTED"):
+            with self.subTest(status=status):
+                result = self.module.build_observations(
+                    [score(value=Decimal("1"))], session_statuses={"1": status}
+                )
+                self.assertEqual(result.observations[0].status, ObservationStatus.NO_DATA)
+                self.assertIsNone(result.observations[0].value)
+                self.assertEqual(result.issues[0].code, f"SESSION_{status}")
+
+    def test_missing_status_never_consumes_historical_score(self):
+        result = self.module.build_observations([score(value=Decimal("1"))])
+        self.assertEqual(result.observations[0].status, ObservationStatus.NO_DATA)
+        self.assertIsNone(result.observations[0].value)
+        self.assertEqual(result.issues[0].code, "SESSION_STATUS_UNKNOWN")
 
     def test_needs_review_status_wins_over_stale_score(self):
         result = self.module.build_observations(
